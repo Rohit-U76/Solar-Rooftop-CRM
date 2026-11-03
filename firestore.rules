@@ -1,0 +1,950 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // Hardened Global Primitives
+    // =========================================================================
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isVerifiedUser() && request.auth.uid == uid;
+    }
+
+    // Bootstrapped Admin (in-memory verified email check, zero DB reads, safe in list rules)
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'rohitumdale@gmail.com';
+    }
+
+    // Full Admin check (only used in single-document operations, never in list rules)
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidStaffList(arr) {
+      return arr is list && arr.size() <= 10 && (arr.size() == 0 || (arr[0] is string && arr[0].size() <= 128));
+    }
+
+    // =========================================================================
+    // Validation Blueprints (Anti-Update-Gap)
+    // =========================================================================
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'role', 'activeWorkspace', 'preferredLanguage', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'role', 'activeWorkspace', 'preferredLanguage', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120 &&
+        data.role is string && data.role.size() <= 20 && data.role in ['HOMEOWNER', 'SALES_STAFF', 'ADMIN'] &&
+        data.activeWorkspace is string && data.activeWorkspace.size() <= 20 && data.activeWorkspace in ['HOMEOWNER', 'SALES'] &&
+        data.preferredLanguage is string && data.preferredLanguage.size() <= 5 && data.preferredLanguage in ['en', 'mr', 'hi'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivatePii(data) {
+      return data.keys().hasAll(['uid', 'email', 'phone', 'dpdpConsentAccepted', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'phone', 'dpdpConsentAccepted', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+        data.email is string && data.email.size() <= 160 &&
+        data.phone is string && data.phone.size() <= 20 &&
+        data.dpdpConsentAccepted is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['uid', 'email', 'roleCode', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'roleCode', 'createdAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        data.roleCode is string && data.roleCode.size() <= 20 && data.roleCode in ['ADMIN', 'SALES_STAFF'] &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidSolarLead(data) {
+      return data.keys().hasAll([
+          'leadNumber', 'ownerUid', 'assignedStaffUids', 'customerName', 'ownershipType',
+          'roofType', 'rooftopAreaSqFt', 'avgMonthlyBillInr', 'averageUnitsKwh', 'sanctionedLoadKw',
+          'pincode', 'city', 'qualificationCategory', 'leadScore', 'recommendedCapacityKw',
+          'recommendationLabel', 'surveyStatus', 'leadStage', 'monthKey', 'isSampleSeed', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'leadNumber', 'ownerUid', 'assignedStaffUids', 'customerName', 'ownershipType',
+          'roofType', 'rooftopAreaSqFt', 'avgMonthlyBillInr', 'averageUnitsKwh', 'sanctionedLoadKw',
+          'pincode', 'city', 'qualificationCategory', 'leadScore', 'recommendedCapacityKw',
+          'recommendationLabel', 'surveyStatus', 'leadStage', 'monthKey', 'isSampleSeed', 'createdAt', 'updatedAt'
+        ]) &&
+        data.leadNumber is string && data.leadNumber.size() >= 4 && data.leadNumber.size() <= 24 && data.leadNumber.matches('^LD-[0-9]{4,8}$') &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+        isValidStaffList(data.assignedStaffUids) &&
+        data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 100 &&
+        data.ownershipType is string && data.ownershipType.size() <= 16 && data.ownershipType in ['OWNER', 'TENANT'] &&
+        data.roofType is string && data.roofType.size() <= 20 && data.roofType in ['RCC', 'METAL_SHEET', 'TILED', 'OTHER'] &&
+        data.rooftopAreaSqFt is number && data.rooftopAreaSqFt >= 50 && data.rooftopAreaSqFt <= 100000 &&
+        data.avgMonthlyBillInr is number && data.avgMonthlyBillInr >= 0 && data.avgMonthlyBillInr <= 1000000 &&
+        data.averageUnitsKwh is number && data.averageUnitsKwh >= 0 && data.averageUnitsKwh <= 200000 &&
+        data.sanctionedLoadKw is number && data.sanctionedLoadKw >= 0 && data.sanctionedLoadKw <= 500 &&
+        data.pincode is string && data.pincode.size() == 6 && data.pincode.matches('^[0-9]{6}$') &&
+        data.city is string && data.city.size() >= 2 && data.city.size() <= 60 &&
+        data.qualificationCategory is string && data.qualificationCategory.size() <= 12 && data.qualificationCategory in ['HIGH', 'MEDIUM', 'LOW'] &&
+        data.leadScore is number && data.leadScore >= 0 && data.leadScore <= 100 &&
+        data.recommendedCapacityKw is number && data.recommendedCapacityKw >= 0 && data.recommendedCapacityKw <= 500 &&
+        data.recommendationLabel is string && data.recommendationLabel.size() >= 1 && data.recommendationLabel.size() <= 120 &&
+        data.surveyStatus is string && data.surveyStatus.size() <= 32 && data.surveyStatus in ['PENDING_REVIEW', 'CALL_SCHEDULED', 'SURVEY_SCHEDULED', 'SURVEY_COMPLETED', 'HOLD_TENANT_CONSENT'] &&
+        data.leadStage is string && data.leadStage.size() <= 32 && data.leadStage in ['NEW', 'BILL_UPLOADED', 'EXTRACTION_CONFIRMED', 'QUALIFIED', 'QUOTED', 'CONVERTED'] &&
+        data.monthKey is string && data.monthKey.size() == 7 && data.monthKey.matches('^[0-9]{4}-[0-9]{2}$') &&
+        data.isSampleSeed is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidLeadContactPii(data) {
+      return data.keys().hasAll(['leadId', 'ownerUid', 'assignedStaffUids', 'mobileNumber', 'email', 'dpdpConsent', 'retentionDays', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['leadId', 'ownerUid', 'assignedStaffUids', 'mobileNumber', 'email', 'dpdpConsent', 'retentionDays', 'createdAt', 'updatedAt']) &&
+        data.leadId is string && data.leadId.size() >= 1 && data.leadId.size() <= 128 &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+        isValidStaffList(data.assignedStaffUids) &&
+        data.mobileNumber is string && data.mobileNumber.size() == 10 && data.mobileNumber.matches('^[6-9][0-9]{9}$') &&
+        data.email is string && data.email.size() <= 160 &&
+        data.dpdpConsent is bool && data.dpdpConsent == true &&
+        data.retentionDays is number && data.retentionDays >= 30 && data.retentionDays <= 3650 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidElectricityBill(data) {
+      return data.keys().hasAll(['leadId', 'ownerUid', 'assignedStaffUids', 'fileName', 'mimeType', 'fileSizeBytes', 'storageRef', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['leadId', 'ownerUid', 'assignedStaffUids', 'fileName', 'mimeType', 'fileSizeBytes', 'storageRef', 'createdAt', 'updatedAt']) &&
+        data.leadId is string && data.leadId.size() >= 1 && data.leadId.size() <= 128 &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+        isValidStaffList(data.assignedStaffUids) &&
+        data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 160 &&
+        data.mimeType is string && data.mimeType.size() <= 30 && data.mimeType in ['image/jpeg', 'image/png', 'image/webp'] &&
+        data.fileSizeBytes is number && data.fileSizeBytes >= 1 && data.fileSizeBytes <= 5242880 &&
+        data.storageRef is string && data.storageRef.size() >= 1 && data.storageRef.size() <= 300 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBillExtraction(data) {
+      return data.keys().hasAll([
+          'leadId', 'billId', 'ownerUid', 'assignedStaffUids', 'consumerNumber', 'discomName',
+          'tariffCategory', 'sanctionedLoadKw', 'monthlyUnitsKwh', 'billingAmountInr', 'billingPeriod',
+          'confidenceScore', 'clarityStatus', 'verificationStatus', 'extractionNotes', 'verifiedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'leadId', 'billId', 'ownerUid', 'assignedStaffUids', 'consumerNumber', 'discomName',
+          'tariffCategory', 'sanctionedLoadKw', 'monthlyUnitsKwh', 'billingAmountInr', 'billingPeriod',
+          'confidenceScore', 'clarityStatus', 'verificationStatus', 'extractionNotes', 'verifiedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.leadId is string && data.leadId.size() >= 1 && data.leadId.size() <= 128 &&
+        data.billId is string && data.billId.size() >= 1 && data.billId.size() <= 128 &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+        isValidStaffList(data.assignedStaffUids) &&
+        data.consumerNumber is string && data.consumerNumber.size() <= 60 &&
+        data.discomName is string && data.discomName.size() <= 120 &&
+        data.tariffCategory is string && data.tariffCategory.size() <= 80 &&
+        data.sanctionedLoadKw is number && data.sanctionedLoadKw >= 0 && data.sanctionedLoadKw <= 500 &&
+        data.monthlyUnitsKwh is number && data.monthlyUnitsKwh >= 0 && data.monthlyUnitsKwh <= 200000 &&
+        data.billingAmountInr is number && data.billingAmountInr >= 0 && data.billingAmountInr <= 1000000 &&
+        data.billingPeriod is string && data.billingPeriod.size() <= 80 &&
+        data.confidenceScore is number && data.confidenceScore >= 0 && data.confidenceScore <= 100 &&
+        data.clarityStatus is string && data.clarityStatus.size() <= 24 && data.clarityStatus in ['CLEAR', 'LOW_CONFIDENCE', 'UNCLEAR_REUPLOAD'] &&
+        data.verificationStatus is string && data.verificationStatus.size() <= 30 && data.verificationStatus in ['PENDING_VERIFICATION', 'USER_CONFIRMED', 'STAFF_VERIFIED', 'REUPLOAD_REQUIRED'] &&
+        data.extractionNotes is string && data.extractionNotes.size() <= 600 &&
+        data.verifiedByUid is string && data.verifiedByUid.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidLeadScoreRecord(data) {
+      return data.keys().hasAll([
+          'leadId', 'ownerUid', 'assignedStaffUids', 'totalScore', 'category', 'recommendedCapacityKw',
+          'recommendationLabel', 'ownershipPoints', 'billPoints', 'roofAreaPoints', 'loadPoints',
+          'pincodePoints', 'consumptionPoints', 'recommendationReason', 'nextRecommendedAction',
+          'isOverridden', 'overrideReason', 'overriddenByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'leadId', 'ownerUid', 'assignedStaffUids', 'totalScore', 'category', 'recommendedCapacityKw',
+          'recommendationLabel', 'ownershipPoints', 'billPoints', 'roofAreaPoints', 'loadPoints',
+          'pincodePoints', 'consumptionPoints', 'recommendationReason', 'nextRecommendedAction',
+          'isOverridden', 'overrideReason', 'overriddenByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.leadId is string && data.leadId.size() >= 1 && data.leadId.size() <= 128 &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+        isValidStaffList(data.assignedStaffUids) &&
+        data.totalScore is number && data.totalScore >= 0 && data.totalScore <= 100 &&
+        data.category is string && data.category.size() <= 12 && data.category in ['HIGH', 'MEDIUM', 'LOW'] &&
+        data.recommendedCapacityKw is number && data.recommendedCapacityKw >= 0 && data.recommendedCapacityKw <= 500 &&
+        data.recommendationLabel is string && data.recommendationLabel.size() >= 1 && data.recommendationLabel.size() <= 120 &&
+        data.ownershipPoints is number && data.ownershipPoints >= 0 && data.ownershipPoints <= 30 &&
+        data.billPoints is number && data.billPoints >= 0 && data.billPoints <= 30 &&
+        data.roofAreaPoints is number && data.roofAreaPoints >= 0 && data.roofAreaPoints <= 25 &&
+        data.loadPoints is number && data.loadPoints >= 0 && data.loadPoints <= 15 &&
+        data.pincodePoints is number && data.pincodePoints >= 0 && data.pincodePoints <= 15 &&
+        data.consumptionPoints is number && data.consumptionPoints >= 0 && data.consumptionPoints <= 25 &&
+        data.recommendationReason is string && data.recommendationReason.size() >= 1 && data.recommendationReason.size() <= 1000 &&
+        data.nextRecommendedAction is string && data.nextRecommendedAction.size() <= 300 &&
+        data.isOverridden is bool &&
+        data.overrideReason is string && data.overrideReason.size() <= 500 &&
+        data.overriddenByUid is string && data.overriddenByUid.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAdminConfigRule(data) {
+      return data.keys().hasAll([
+          'ruleCategory', 'workspaceScope', 'title', 'code', 'versionNumber',
+          'effectiveFrom', 'effectiveTo', 'isActive', 'parameters', 'notes', 'createdByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ruleCategory', 'workspaceScope', 'title', 'code', 'versionNumber',
+          'effectiveFrom', 'effectiveTo', 'isActive', 'parameters', 'notes', 'createdByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.ruleCategory is string && data.ruleCategory.size() <= 30 && data.ruleCategory in ['SOLAR_OPTION', 'SUBSIDY_RULE', 'PRICING_RULE', 'ELECTRICITY_TARIFF'] &&
+        data.workspaceScope is string && data.workspaceScope.size() >= 1 && data.workspaceScope.size() <= 128 &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
+        data.code is string && data.code.size() >= 2 && data.code.size() <= 60 &&
+        data.versionNumber is number && data.versionNumber >= 1 && data.versionNumber <= 10000 &&
+        data.effectiveFrom is string && data.effectiveFrom.size() == 10 && data.effectiveFrom.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.effectiveTo is string && data.effectiveTo.size() == 10 && data.effectiveTo.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.isActive is bool &&
+        data.parameters is map && data.parameters.keys().size() <= 20 &&
+        data.notes is string && data.notes.size() <= 500 &&
+        data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSolarQuotation(data) {
+      return data.keys().hasAll([
+          'quotationNumber', 'leadId', 'ownerUid', 'assignedStaffUids', 'customerName', 'city', 'pincode',
+          'ownershipType', 'systemCapacityKw', 'panelTypeLabel', 'annualGenerationUnits', 'equipmentCostInr',
+          'installationChargesInr', 'totalInstallationCostInr', 'applicableSubsidyInr', 'netCustomerCostInr',
+          'electricityTariffInr', 'selfConsumptionUnits', 'estimatedAnnualSavingsInr', 'estimatedPaybackYears',
+          'quotationDate', 'validUntilDate', 'appliedRuleSnapshot', 'status', 'createdByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'quotationNumber', 'leadId', 'ownerUid', 'assignedStaffUids', 'customerName', 'city', 'pincode',
+          'ownershipType', 'systemCapacityKw', 'panelTypeLabel', 'annualGenerationUnits', 'equipmentCostInr',
+          'installationChargesInr', 'totalInstallationCostInr', 'applicableSubsidyInr', 'netCustomerCostInr',
+          'electricityTariffInr', 'selfConsumptionUnits', 'estimatedAnnualSavingsInr', 'estimatedPaybackYears',
+          'quotationDate', 'validUntilDate', 'appliedRuleSnapshot', 'status', 'createdByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.quotationNumber is string && data.quotationNumber.size() >= 4 && data.quotationNumber.size() <= 32 && data.quotationNumber.matches('^QT-[0-9A-Z\\-]+$') &&
+        data.leadId is string && data.leadId.size() >= 1 && data.leadId.size() <= 128 &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+        isValidStaffList(data.assignedStaffUids) &&
+        data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 100 &&
+        data.city is string && data.city.size() >= 2 && data.city.size() <= 60 &&
+        data.pincode is string && data.pincode.size() == 6 &&
+        data.ownershipType is string && data.ownershipType.size() <= 16 && data.ownershipType in ['OWNER', 'TENANT'] &&
+        data.systemCapacityKw is number && data.systemCapacityKw >= 0.5 && data.systemCapacityKw <= 500 &&
+        data.panelTypeLabel is string && data.panelTypeLabel.size() >= 2 && data.panelTypeLabel.size() <= 120 &&
+        data.annualGenerationUnits is number && data.annualGenerationUnits >= 0 && data.annualGenerationUnits <= 1000000 &&
+        data.equipmentCostInr is number && data.equipmentCostInr >= 0 && data.equipmentCostInr <= 50000000 &&
+        data.installationChargesInr is number && data.installationChargesInr >= 0 && data.installationChargesInr <= 10000000 &&
+        data.totalInstallationCostInr is number && data.totalInstallationCostInr >= 0 && data.totalInstallationCostInr <= 60000000 &&
+        data.applicableSubsidyInr is number && data.applicableSubsidyInr >= 0 && data.applicableSubsidyInr <= 500000 &&
+        data.netCustomerCostInr is number && data.netCustomerCostInr >= 0 && data.netCustomerCostInr <= 60000000 &&
+        data.electricityTariffInr is number && data.electricityTariffInr >= 0 && data.electricityTariffInr <= 50 &&
+        data.selfConsumptionUnits is number && data.selfConsumptionUnits >= 0 && data.selfConsumptionUnits <= 1000000 &&
+        data.estimatedAnnualSavingsInr is number && data.estimatedAnnualSavingsInr >= 0 && data.estimatedAnnualSavingsInr <= 10000000 &&
+        data.estimatedPaybackYears is number && data.estimatedPaybackYears >= 0 && data.estimatedPaybackYears <= 100 &&
+        data.quotationDate is string && data.quotationDate.size() == 10 &&
+        data.validUntilDate is string && data.validUntilDate.size() == 10 &&
+        data.appliedRuleSnapshot is map && data.appliedRuleSnapshot.keys().size() <= 25 &&
+        data.status is string && data.status.size() <= 20 && data.status in ['DRAFT', 'ISSUED', 'APPROVED', 'REJECTED', 'CONVERTED'] &&
+        data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidQuotationItem(data) {
+      return data.keys().hasAll(['quotationId', 'ownerUid', 'assignedStaffUids', 'itemName', 'specification', 'quantity', 'unitPriceInr', 'lineTotalInr', 'createdAt']) &&
+        data.keys().hasOnly(['quotationId', 'ownerUid', 'assignedStaffUids', 'itemName', 'specification', 'quantity', 'unitPriceInr', 'lineTotalInr', 'createdAt']) &&
+        data.quotationId is string && data.quotationId.size() >= 1 && data.quotationId.size() <= 128 &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+        isValidStaffList(data.assignedStaffUids) &&
+        data.itemName is string && data.itemName.size() >= 2 && data.itemName.size() <= 140 &&
+        data.specification is string && data.specification.size() >= 2 && data.specification.size() <= 240 &&
+        data.quantity is number && data.quantity >= 1 && data.quantity <= 10000 &&
+        data.unitPriceInr is number && data.unitPriceInr >= 0 && data.unitPriceInr <= 50000000 &&
+        data.lineTotalInr is number && data.lineTotalInr >= 0 && data.lineTotalInr <= 50000000 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidSolarProject(data) {
+      return data.keys().hasAll([
+          'projectNumber', 'quotationId', 'leadId', 'ownerUid', 'assignedStaffUids', 'customerName',
+          'city', 'pincode', 'systemCapacityKw', 'netCustomerCostInr', 'applicableSubsidyInr',
+          'currentStage', 'stageIndex', 'pendingActivities', 'isDelayed', 'delayReason',
+          'trackingToken', 'stageStartedAt', 'completionMonthKey', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'projectNumber', 'quotationId', 'leadId', 'ownerUid', 'assignedStaffUids', 'customerName',
+          'city', 'pincode', 'systemCapacityKw', 'netCustomerCostInr', 'applicableSubsidyInr',
+          'currentStage', 'stageIndex', 'pendingActivities', 'isDelayed', 'delayReason',
+          'trackingToken', 'stageStartedAt', 'completionMonthKey', 'createdAt', 'updatedAt'
+        ]) &&
+        data.projectNumber is string && data.projectNumber.size() >= 4 && data.projectNumber.size() <= 32 && data.projectNumber.matches('^PRJ-[0-9A-Z\\-]+$') &&
+        data.quotationId is string && data.quotationId.size() >= 1 && data.quotationId.size() <= 128 &&
+        data.leadId is string && data.leadId.size() >= 1 && data.leadId.size() <= 128 &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+        isValidStaffList(data.assignedStaffUids) &&
+        data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 100 &&
+        data.city is string && data.city.size() >= 2 && data.city.size() <= 60 &&
+        data.pincode is string && data.pincode.size() == 6 &&
+        data.systemCapacityKw is number && data.systemCapacityKw >= 0.5 && data.systemCapacityKw <= 500 &&
+        data.netCustomerCostInr is number && data.netCustomerCostInr >= 0 && data.netCustomerCostInr <= 60000000 &&
+        data.applicableSubsidyInr is number && data.applicableSubsidyInr >= 0 && data.applicableSubsidyInr <= 500000 &&
+        data.currentStage is string && data.currentStage.size() <= 40 && data.currentStage in [
+          'QUOTATION_APPROVED',
+          'ADVANCE_PAYMENT_RECEIVED',
+          'SITE_SURVEY_COMPLETED',
+          'INSTALLATION_SCHEDULED',
+          'INSTALLATION_IN_PROGRESS',
+          'INSTALLATION_COMPLETED',
+          'NET_METERING_DISCOM',
+          'SUBSIDY_SUBMITTED',
+          'SUBSIDY_CREDITED',
+          'PROJECT_COMPLETED'
+        ] &&
+        data.stageIndex is number && data.stageIndex >= 1 && data.stageIndex <= 10 &&
+        data.pendingActivities is string && data.pendingActivities.size() <= 400 &&
+        data.isDelayed is bool &&
+        data.delayReason is string && data.delayReason.size() <= 300 &&
+        data.trackingToken is string && data.trackingToken.size() >= 24 && data.trackingToken.size() <= 64 && data.trackingToken.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.stageStartedAt is string && data.stageStartedAt.size() <= 40 &&
+        data.completionMonthKey is string && data.completionMonthKey.size() <= 7 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidProjectDocument(data) {
+      return data.keys().hasAll(['projectId', 'ownerUid', 'assignedStaffUids', 'docTitle', 'docType', 'fileName', 'fileSizeKb', 'uploadedByUid', 'notes', 'createdAt']) &&
+        data.keys().hasOnly(['projectId', 'ownerUid', 'assignedStaffUids', 'docTitle', 'docType', 'fileName', 'fileSizeKb', 'uploadedByUid', 'notes', 'createdAt']) &&
+        data.projectId is string && data.projectId.size() >= 1 && data.projectId.size() <= 128 &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+        isValidStaffList(data.assignedStaffUids) &&
+        data.docTitle is string && data.docTitle.size() >= 2 && data.docTitle.size() <= 140 &&
+        data.docType is string && data.docType.size() <= 40 && data.docType in ['SITE_SURVEY_REPORT', 'SINGLE_LINE_DIAGRAM', 'NET_METERING_APPLICATION', 'SUBSIDY_VOUCHER', 'COMMISSIONING_REPORT'] &&
+        data.fileName is string && data.fileName.size() >= 2 && data.fileName.size() <= 160 &&
+        data.fileSizeKb is number && data.fileSizeKb >= 1 && data.fileSizeKb <= 10240 &&
+        data.uploadedByUid is string && data.uploadedByUid.size() >= 1 && data.uploadedByUid.size() <= 128 &&
+        data.notes is string && data.notes.size() <= 300 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidProjectPayment(data) {
+      return data.keys().hasAll(['projectId', 'ownerUid', 'assignedStaffUids', 'paymentReference', 'milestone', 'amountInr', 'paymentMode', 'isSimulation', 'recordedByUid', 'createdAt']) &&
+        data.keys().hasOnly(['projectId', 'ownerUid', 'assignedStaffUids', 'paymentReference', 'milestone', 'amountInr', 'paymentMode', 'isSimulation', 'recordedByUid', 'createdAt']) &&
+        data.projectId is string && data.projectId.size() >= 1 && data.projectId.size() <= 128 &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+        isValidStaffList(data.assignedStaffUids) &&
+        data.paymentReference is string && data.paymentReference.size() >= 4 && data.paymentReference.size() <= 48 &&
+        data.milestone is string && data.milestone.size() <= 32 && data.milestone in ['ADVANCE_BOOKING', 'STRUCTURE_DISPATCH', 'FINAL_HANDOVER'] &&
+        data.amountInr is number && data.amountInr >= 1 && data.amountInr <= 60000000 &&
+        data.paymentMode is string && data.paymentMode.size() <= 32 && data.paymentMode in ['SIMULATED_UPI', 'SIMULATED_NEFT', 'SIMULATED_CARD'] &&
+        data.isSimulation is bool && data.isSimulation == true &&
+        data.recordedByUid is string && data.recordedByUid.size() >= 1 && data.recordedByUid.size() <= 128 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidProjectHistory(data) {
+      return data.keys().hasAll(['projectId', 'ownerUid', 'assignedStaffUids', 'fromStage', 'toStage', 'stageIndex', 'remarks', 'updatedByUid', 'updatedByName', 'createdAt']) &&
+        data.keys().hasOnly(['projectId', 'ownerUid', 'assignedStaffUids', 'fromStage', 'toStage', 'stageIndex', 'remarks', 'updatedByUid', 'updatedByName', 'createdAt']) &&
+        data.projectId is string && data.projectId.size() >= 1 && data.projectId.size() <= 128 &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+        isValidStaffList(data.assignedStaffUids) &&
+        data.fromStage is string && data.fromStage.size() <= 60 &&
+        data.toStage is string && data.toStage.size() >= 1 && data.toStage.size() <= 60 &&
+        data.stageIndex is number && data.stageIndex >= 1 && data.stageIndex <= 10 &&
+        data.remarks is string && data.remarks.size() <= 400 &&
+        data.updatedByUid is string && data.updatedByUid.size() >= 1 && data.updatedByUid.size() <= 128 &&
+        data.updatedByName is string && data.updatedByName.size() >= 1 && data.updatedByName.size() <= 100 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidPublicTracking(data) {
+      return data.keys().hasAll([
+          'trackingToken', 'projectId', 'projectNumber', 'customerMask', 'city',
+          'systemCapacityKw', 'currentStage', 'stageIndex', 'completedStageIndices',
+          'pendingActivities', 'isDelayed', 'delaySummary', 'ownerUid', 'assignedStaffUids', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'trackingToken', 'projectId', 'projectNumber', 'customerMask', 'city',
+          'systemCapacityKw', 'currentStage', 'stageIndex', 'completedStageIndices',
+          'pendingActivities', 'isDelayed', 'delaySummary', 'ownerUid', 'assignedStaffUids', 'createdAt', 'updatedAt'
+        ]) &&
+        data.trackingToken is string && data.trackingToken.size() >= 24 && data.trackingToken.size() <= 64 && data.trackingToken.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.projectId is string && data.projectId.size() >= 1 && data.projectId.size() <= 128 &&
+        data.projectNumber is string && data.projectNumber.size() >= 4 && data.projectNumber.size() <= 32 &&
+        data.customerMask is string && data.customerMask.size() >= 2 && data.customerMask.size() <= 80 &&
+        data.city is string && data.city.size() >= 2 && data.city.size() <= 60 &&
+        data.systemCapacityKw is number && data.systemCapacityKw >= 0.5 && data.systemCapacityKw <= 500 &&
+        data.currentStage is string && data.currentStage.size() >= 1 && data.currentStage.size() <= 60 &&
+        data.stageIndex is number && data.stageIndex >= 1 && data.stageIndex <= 10 &&
+        data.completedStageIndices is list && data.completedStageIndices.size() <= 10 && (data.completedStageIndices.size() == 0 || data.completedStageIndices[0] is number) &&
+        data.pendingActivities is string && data.pendingActivities.size() <= 400 &&
+        data.isDelayed is bool &&
+        data.delaySummary is string && data.delaySummary.size() <= 300 &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+        isValidStaffList(data.assignedStaffUids) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll([
+          'recipientUid', 'assignedStaffUids', 'channel', 'eventType', 'referenceCode',
+          'maskedRecipientPhone', 'title', 'message', 'isRead', 'isSimulation', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'recipientUid', 'assignedStaffUids', 'channel', 'eventType', 'referenceCode',
+          'maskedRecipientPhone', 'title', 'message', 'isRead', 'isSimulation', 'createdAt', 'updatedAt'
+        ]) &&
+        data.recipientUid is string && data.recipientUid.size() >= 1 && data.recipientUid.size() <= 128 &&
+        isValidStaffList(data.assignedStaffUids) &&
+        data.channel is string && data.channel.size() <= 28 && data.channel in ['WHATSAPP_SIMULATION', 'SMS_SIMULATION', 'IN_APP'] &&
+        data.eventType is string && data.eventType.size() <= 32 && data.eventType in ['LEAD_CREATED', 'BILL_VERIFIED', 'LEAD_SCORED', 'QUOTATION_ISSUED', 'QUOTATION_APPROVED', 'PAYMENT_SIMULATED', 'PROJECT_STAGE_UPDATED'] &&
+        data.referenceCode is string && data.referenceCode.size() >= 2 && data.referenceCode.size() <= 40 &&
+        data.maskedRecipientPhone is string && data.maskedRecipientPhone.size() <= 20 &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 140 &&
+        data.message is string && data.message.size() >= 2 && data.message.size() <= 600 &&
+        data.isRead is bool &&
+        data.isSimulation is bool && data.isSimulation == true &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // =========================================================================
+    // Match Blocks (All 17 Collection Paths)
+    // =========================================================================
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if false;
+      allow create: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (incoming().role == 'HOMEOWNER' || (isBootstrappedAdmin() && incoming().role == 'ADMIN'));
+      allow update: if isValidUserProfile(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(userId) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          (isOwner(userId) && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'activeWorkspace', 'preferredLanguage', 'updatedAt'])) ||
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'activeWorkspace', 'updatedAt']))
+        );
+      allow delete: if false;
+    }
+
+    match /user_private/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if false;
+      allow create: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidUserPrivatePii(incoming()) &&
+        incoming().uid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidUserPrivatePii(incoming()) &&
+        isOwner(userId) &&
+        isValidId(userId) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['email', 'phone', 'dpdpConsentAccepted', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && (isOwner(adminId) || isAdmin());
+      allow list: if false;
+      allow create: if isBootstrappedAdmin() &&
+        isValidId(adminId) &&
+        isValidAdminRecord(incoming()) &&
+        incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /leads/{leadId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(leadId) &&
+        (existing().ownerUid == request.auth.uid || request.auth.uid in existing().assignedStaffUids || isAdmin());
+      allow list: if isVerifiedUser() &&
+        (resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.assignedStaffUids || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(leadId) &&
+        isValidSolarLead(incoming()) &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidSolarLead(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(leadId) &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().leadNumber == existing().leadNumber &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (existing().leadStage != 'CONVERTED' || isAdmin()) && (
+          isBootstrappedAdmin() ||
+          (existing().ownerUid == request.auth.uid &&
+            incoming().assignedStaffUids == existing().assignedStaffUids &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'averageUnitsKwh', 'sanctionedLoadKw', 'avgMonthlyBillInr',
+              'qualificationCategory', 'leadScore', 'recommendedCapacityKw',
+              'recommendationLabel', 'surveyStatus', 'leadStage', 'updatedAt'
+            ])) ||
+          (request.auth.uid in existing().assignedStaffUids &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'customerName', 'ownershipType', 'roofType', 'rooftopAreaSqFt',
+              'avgMonthlyBillInr', 'averageUnitsKwh', 'sanctionedLoadKw', 'pincode', 'city',
+              'qualificationCategory', 'leadScore', 'recommendedCapacityKw', 'recommendationLabel',
+              'surveyStatus', 'leadStage', 'assignedStaffUids', 'updatedAt'
+            ])) ||
+          isAdmin()
+        );
+      allow delete: if false;
+    }
+
+    match /lead_contacts/{leadId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(leadId) &&
+        (existing().ownerUid == request.auth.uid || request.auth.uid in existing().assignedStaffUids || isAdmin());
+      allow list: if isVerifiedUser() &&
+        (resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.assignedStaffUids || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(leadId) &&
+        isValidLeadContactPii(incoming()) &&
+        incoming().leadId == leadId &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (exists(/databases/$(database)/documents/leads/$(leadId)) || existsAfter(/databases/$(database)/documents/leads/$(leadId)));
+      allow update: if isValidLeadContactPii(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(leadId) &&
+        incoming().leadId == existing().leadId &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isBootstrappedAdmin() ||
+          (existing().ownerUid == request.auth.uid && incoming().assignedStaffUids == existing().assignedStaffUids && incoming().diff(existing()).affectedKeys().hasOnly(['mobileNumber', 'email', 'updatedAt'])) ||
+          (request.auth.uid in existing().assignedStaffUids && incoming().diff(existing()).affectedKeys().hasOnly(['mobileNumber', 'email', 'assignedStaffUids', 'updatedAt'])) ||
+          isAdmin()
+        );
+      allow delete: if false;
+    }
+
+    match /electricity_bills/{billId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(billId) &&
+        (existing().ownerUid == request.auth.uid || request.auth.uid in existing().assignedStaffUids || isAdmin());
+      allow list: if isVerifiedUser() &&
+        (resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.assignedStaffUids || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(billId) &&
+        isValidElectricityBill(incoming()) &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (exists(/databases/$(database)/documents/leads/$(incoming().leadId)) || existsAfter(/databases/$(database)/documents/leads/$(incoming().leadId)));
+      allow update: if isValidElectricityBill(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(billId) &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().leadId == existing().leadId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isBootstrappedAdmin() ||
+          (existing().ownerUid == request.auth.uid && incoming().assignedStaffUids == existing().assignedStaffUids && incoming().diff(existing()).affectedKeys().hasOnly(['fileName', 'mimeType', 'fileSizeBytes', 'storageRef', 'updatedAt'])) ||
+          isAdmin()
+        );
+      allow delete: if false;
+    }
+
+    match /bill_extractions/{extractionId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(extractionId) &&
+        (existing().ownerUid == request.auth.uid || request.auth.uid in existing().assignedStaffUids || isAdmin());
+      allow list: if isVerifiedUser() &&
+        (resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.assignedStaffUids || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(extractionId) &&
+        isValidBillExtraction(incoming()) &&
+        (incoming().ownerUid == request.auth.uid || request.auth.uid in incoming().assignedStaffUids || isAdmin()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (exists(/databases/$(database)/documents/leads/$(incoming().leadId)) || existsAfter(/databases/$(database)/documents/leads/$(incoming().leadId)));
+      allow update: if isValidBillExtraction(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(extractionId) &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().leadId == existing().leadId &&
+        incoming().billId == existing().billId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isBootstrappedAdmin() ||
+          ((existing().ownerUid == request.auth.uid || request.auth.uid in existing().assignedStaffUids) &&
+            incoming().confidenceScore == existing().confidenceScore &&
+            incoming().clarityStatus == existing().clarityStatus &&
+            incoming().verifiedByUid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'consumerNumber', 'discomName', 'tariffCategory', 'sanctionedLoadKw',
+              'monthlyUnitsKwh', 'billingAmountInr', 'billingPeriod',
+              'verificationStatus', 'extractionNotes', 'verifiedByUid', 'updatedAt'
+            ])) ||
+          isAdmin()
+        );
+      allow delete: if false;
+    }
+
+    match /lead_scores/{scoreId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(scoreId) &&
+        (existing().ownerUid == request.auth.uid || request.auth.uid in existing().assignedStaffUids || isAdmin());
+      allow list: if isVerifiedUser() &&
+        (resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.assignedStaffUids || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(scoreId) &&
+        isValidLeadScoreRecord(incoming()) &&
+        (incoming().ownerUid == request.auth.uid || request.auth.uid in incoming().assignedStaffUids || isAdmin()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (exists(/databases/$(database)/documents/leads/$(incoming().leadId)) || existsAfter(/databases/$(database)/documents/leads/$(incoming().leadId)));
+      allow update: if isValidLeadScoreRecord(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(scoreId) &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().leadId == existing().leadId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isBootstrappedAdmin() ||
+          (existing().ownerUid == request.auth.uid &&
+            incoming().isOverridden == false &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'totalScore', 'category', 'recommendedCapacityKw', 'recommendationLabel',
+              'ownershipPoints', 'billPoints', 'roofAreaPoints', 'loadPoints',
+              'pincodePoints', 'consumptionPoints', 'recommendationReason', 'nextRecommendedAction', 'updatedAt'
+            ])) ||
+          (request.auth.uid in existing().assignedStaffUids &&
+            incoming().isOverridden == true &&
+            incoming().overrideReason.size() >= 5 &&
+            incoming().overriddenByUid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'totalScore', 'category', 'recommendedCapacityKw', 'recommendationLabel',
+              'recommendationReason', 'nextRecommendedAction', 'isOverridden', 'overrideReason', 'overriddenByUid', 'updatedAt'
+            ])) ||
+          isAdmin()
+        );
+      allow delete: if false;
+    }
+
+    match /admin_rules/{ruleId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(ruleId) &&
+        (existing().workspaceScope == 'global' || existing().workspaceScope == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() &&
+        (resource.data.workspaceScope == 'global' || resource.data.workspaceScope == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(ruleId) &&
+        isValidAdminConfigRule(incoming()) &&
+        incoming().createdByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (incoming().workspaceScope == request.auth.uid || (incoming().workspaceScope == 'global' && isAdmin()));
+      allow update: if isValidAdminConfigRule(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(ruleId) &&
+        incoming().ruleCategory == existing().ruleCategory &&
+        incoming().workspaceScope == existing().workspaceScope &&
+        incoming().code == existing().code &&
+        incoming().versionNumber == existing().versionNumber &&
+        incoming().createdByUid == existing().createdByUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (existing().workspaceScope == request.auth.uid || (existing().workspaceScope == 'global' && isAdmin())) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['isActive', 'effectiveTo', 'notes', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /quotations/{quotationId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(quotationId) &&
+        (existing().ownerUid == request.auth.uid || request.auth.uid in existing().assignedStaffUids || isAdmin());
+      allow list: if isVerifiedUser() &&
+        (resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.assignedStaffUids || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(quotationId) &&
+        isValidSolarQuotation(incoming()) &&
+        incoming().createdByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time && (
+          (exists(/databases/$(database)/documents/leads/$(incoming().leadId)) && (
+            isBootstrappedAdmin() ||
+            get(/databases/$(database)/documents/leads/$(incoming().leadId)).data.ownerUid == request.auth.uid ||
+            request.auth.uid in get(/databases/$(database)/documents/leads/$(incoming().leadId)).data.assignedStaffUids ||
+            isAdmin()
+          )) ||
+          (existsAfter(/databases/$(database)/documents/leads/$(incoming().leadId)) && (
+            isBootstrappedAdmin() ||
+            incoming().ownerUid == request.auth.uid ||
+            request.auth.uid in incoming().assignedStaffUids ||
+            isAdmin()
+          ))
+        );
+      allow update: if isValidSolarQuotation(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(quotationId) &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().leadId == existing().leadId &&
+        incoming().quotationNumber == existing().quotationNumber &&
+        incoming().appliedRuleSnapshot == existing().appliedRuleSnapshot &&
+        incoming().createdByUid == existing().createdByUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (existing().status != 'CONVERTED' || isAdmin()) && (
+          isBootstrappedAdmin() ||
+          (existing().ownerUid == request.auth.uid &&
+            incoming().status in ['APPROVED', 'REJECTED'] &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
+          (request.auth.uid in existing().assignedStaffUids &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'validUntilDate', 'updatedAt'])) ||
+          isAdmin()
+        );
+      allow delete: if false;
+
+      // Subcollection: Quotation Line Items (Pillar 1 Master Gate + Pillar 8 Zero-Lookup List)
+      match /items/{itemId} {
+        allow get: if isVerifiedUser() &&
+          isValidId(quotationId) &&
+          isValidId(itemId) && (
+            isBootstrappedAdmin() ||
+            get(/databases/$(database)/documents/quotations/$(quotationId)).data.ownerUid == request.auth.uid ||
+            request.auth.uid in get(/databases/$(database)/documents/quotations/$(quotationId)).data.assignedStaffUids ||
+            isAdmin()
+          );
+        allow list: if isVerifiedUser() &&
+          (resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.assignedStaffUids || isBootstrappedAdmin());
+        allow create: if isVerifiedUser() &&
+          isValidId(quotationId) &&
+          isValidId(itemId) &&
+          isValidQuotationItem(incoming()) &&
+          incoming().quotationId == quotationId &&
+          incoming().createdAt == request.time && (
+            isBootstrappedAdmin() ||
+            (existsAfter(/databases/$(database)/documents/quotations/$(quotationId)) && (incoming().ownerUid == request.auth.uid || request.auth.uid in incoming().assignedStaffUids)) ||
+            (exists(/databases/$(database)/documents/quotations/$(quotationId)) && request.auth.uid in get(/databases/$(database)/documents/quotations/$(quotationId)).data.assignedStaffUids) ||
+            isAdmin()
+          );
+        allow update, delete: if false;
+      }
+    }
+
+    match /projects/{projectId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(projectId) &&
+        (existing().ownerUid == request.auth.uid || request.auth.uid in existing().assignedStaffUids || isAdmin());
+      allow list: if isVerifiedUser() &&
+        (resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.assignedStaffUids || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(projectId) &&
+        isValidSolarProject(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isBootstrappedAdmin() || incoming().ownerUid == request.auth.uid || request.auth.uid in incoming().assignedStaffUids || isAdmin()) &&
+        (exists(/databases/$(database)/documents/quotations/$(incoming().quotationId)) || existsAfter(/databases/$(database)/documents/quotations/$(incoming().quotationId))) &&
+        existsAfter(/databases/$(database)/documents/public_tracking/$(incoming().trackingToken));
+      allow update: if isValidSolarProject(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(projectId) &&
+        incoming().projectNumber == existing().projectNumber &&
+        incoming().quotationId == existing().quotationId &&
+        incoming().leadId == existing().leadId &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().trackingToken == existing().trackingToken &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (existing().currentStage != 'PROJECT_COMPLETED' || isAdmin()) && (
+          isBootstrappedAdmin() ||
+          (request.auth.uid in existing().assignedStaffUids &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'currentStage', 'stageIndex', 'pendingActivities', 'isDelayed',
+              'delayReason', 'stageStartedAt', 'completionMonthKey', 'updatedAt'
+            ])) ||
+          isAdmin()
+        );
+      allow delete: if false;
+
+      // Subcollection: Project Documents (Master Gate + Zero-Lookup List)
+      match /documents/{docId} {
+        allow get: if isVerifiedUser() &&
+          isValidId(projectId) &&
+          isValidId(docId) && (
+            isBootstrappedAdmin() ||
+            get(/databases/$(database)/documents/projects/$(projectId)).data.ownerUid == request.auth.uid ||
+            request.auth.uid in get(/databases/$(database)/documents/projects/$(projectId)).data.assignedStaffUids ||
+            isAdmin()
+          );
+        allow list: if isVerifiedUser() &&
+          (resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.assignedStaffUids || isBootstrappedAdmin());
+        allow create: if isVerifiedUser() &&
+          isValidId(projectId) &&
+          isValidId(docId) &&
+          isValidProjectDocument(incoming()) &&
+          incoming().projectId == projectId &&
+          incoming().uploadedByUid == request.auth.uid &&
+          incoming().createdAt == request.time && (
+            isBootstrappedAdmin() ||
+            (existsAfter(/databases/$(database)/documents/projects/$(projectId)) && request.auth.uid in incoming().assignedStaffUids) ||
+            (exists(/databases/$(database)/documents/projects/$(projectId)) && request.auth.uid in get(/databases/$(database)/documents/projects/$(projectId)).data.assignedStaffUids) ||
+            isAdmin()
+          );
+        allow update, delete: if false;
+      }
+
+      // Subcollection: Simulated Payments (Master Gate + Zero-Lookup List)
+      match /payments/{paymentId} {
+        allow get: if isVerifiedUser() &&
+          isValidId(projectId) &&
+          isValidId(paymentId) && (
+            isBootstrappedAdmin() ||
+            get(/databases/$(database)/documents/projects/$(projectId)).data.ownerUid == request.auth.uid ||
+            request.auth.uid in get(/databases/$(database)/documents/projects/$(projectId)).data.assignedStaffUids ||
+            isAdmin()
+          );
+        allow list: if isVerifiedUser() &&
+          (resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.assignedStaffUids || isBootstrappedAdmin());
+        allow create: if isVerifiedUser() &&
+          isValidId(projectId) &&
+          isValidId(paymentId) &&
+          isValidProjectPayment(incoming()) &&
+          incoming().projectId == projectId &&
+          incoming().recordedByUid == request.auth.uid &&
+          incoming().createdAt == request.time && (
+            isBootstrappedAdmin() ||
+            (existsAfter(/databases/$(database)/documents/projects/$(projectId)) && (incoming().ownerUid == request.auth.uid || request.auth.uid in incoming().assignedStaffUids)) ||
+            (exists(/databases/$(database)/documents/projects/$(projectId)) && (
+              get(/databases/$(database)/documents/projects/$(projectId)).data.ownerUid == request.auth.uid ||
+              request.auth.uid in get(/databases/$(database)/documents/projects/$(projectId)).data.assignedStaffUids
+            )) ||
+            isAdmin()
+          );
+        allow update, delete: if false;
+      }
+
+      // Subcollection: Status History (Master Gate + Immutable Audit Log)
+      match /history/{historyId} {
+        allow get: if isVerifiedUser() &&
+          isValidId(projectId) &&
+          isValidId(historyId) && (
+            isBootstrappedAdmin() ||
+            get(/databases/$(database)/documents/projects/$(projectId)).data.ownerUid == request.auth.uid ||
+            request.auth.uid in get(/databases/$(database)/documents/projects/$(projectId)).data.assignedStaffUids ||
+            isAdmin()
+          );
+        allow list: if isVerifiedUser() &&
+          (resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.assignedStaffUids || isBootstrappedAdmin());
+        allow create: if isVerifiedUser() &&
+          isValidId(projectId) &&
+          isValidId(historyId) &&
+          isValidProjectHistory(incoming()) &&
+          incoming().projectId == projectId &&
+          incoming().updatedByUid == request.auth.uid &&
+          incoming().createdAt == request.time && (
+            isBootstrappedAdmin() ||
+            (existsAfter(/databases/$(database)/documents/projects/$(projectId)) && (incoming().ownerUid == request.auth.uid || request.auth.uid in incoming().assignedStaffUids)) ||
+            (exists(/databases/$(database)/documents/projects/$(projectId)) && request.auth.uid in get(/databases/$(database)/documents/projects/$(projectId)).data.assignedStaffUids) ||
+            isAdmin()
+          );
+        allow update, delete: if false;
+      }
+    }
+
+    match /public_tracking/{trackingToken} {
+      // Capability URL lookup by unguessable 24..64 char token; list strictly disabled
+      allow get: if isValidId(trackingToken) && trackingToken.size() >= 24 && trackingToken.size() <= 64;
+      allow list: if false;
+      allow create: if isVerifiedUser() &&
+        isValidId(trackingToken) &&
+        isValidPublicTracking(incoming()) &&
+        incoming().trackingToken == trackingToken &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isBootstrappedAdmin() || incoming().ownerUid == request.auth.uid || request.auth.uid in incoming().assignedStaffUids || isAdmin()) &&
+        existsAfter(/databases/$(database)/documents/projects/$(incoming().projectId));
+      allow update: if isValidPublicTracking(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(trackingToken) &&
+        incoming().trackingToken == existing().trackingToken &&
+        incoming().projectId == existing().projectId &&
+        incoming().projectNumber == existing().projectNumber &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isBootstrappedAdmin() ||
+          (request.auth.uid in existing().assignedStaffUids &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'currentStage', 'stageIndex', 'completedStageIndices',
+              'pendingActivities', 'isDelayed', 'delaySummary', 'updatedAt'
+            ])) ||
+          isAdmin()
+        );
+      allow delete: if false;
+    }
+
+    match /notifications/{notificationId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(notificationId) &&
+        (existing().recipientUid == request.auth.uid || request.auth.uid in existing().assignedStaffUids || isAdmin());
+      allow list: if isVerifiedUser() &&
+        (resource.data.recipientUid == request.auth.uid || request.auth.uid in resource.data.assignedStaffUids || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() &&
+        isValidId(notificationId) &&
+        isValidNotification(incoming()) &&
+        (incoming().recipientUid == request.auth.uid || request.auth.uid in incoming().assignedStaffUids || isAdmin()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidNotification(incoming()) &&
+        isVerifiedUser() &&
+        isValidId(notificationId) &&
+        incoming().recipientUid == existing().recipientUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (existing().recipientUid == request.auth.uid || request.auth.uid in existing().assignedStaffUids || isAdmin()) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['isRead', 'updatedAt']);
+      allow delete: if false;
+    }
+  }
+}

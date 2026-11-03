@@ -1,0 +1,6 @@
+{
+  "name": "SuryaSetu Solar CRM & Project Suite",
+  "description": "AI-powered rooftop solar lead qualification, electricity bill vision analysis, deterministic subsidy quotation builder, and installation project tracking platform for Vidarbha.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
