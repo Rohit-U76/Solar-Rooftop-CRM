@@ -1,0 +1,39 @@
+server:
+  port: ${PORT:8080}
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: suryasetu-solar-backend
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/suryasetu_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Kolkata}
+    username: ${SPRING_DATASOURCE_USERNAME:root}
+    password: ${SPRING_DATASOURCE_PASSWORD:root}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+suryasetu:
+  cors:
+    allowed-origins: ${FRONTEND_ORIGINS:http://localhost:3000,http://localhost:5173}
+  security:
+    jwt-secret: ${JWT_SECRET:SuryaSetuVidarbhaNagpurSolarJwtSecretKey2026Minimum32BytesLong!}
+    jwt-expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+    firebase-project-id: ${FIREBASE_PROJECT_ID:data-atom-n01dl}
+    bootstrapped-admin-email: ${BOOTSTRAPPED_ADMIN_EMAIL:rohitumdale@gmail.com}
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+    model: ${GEMINI_MODEL:gemini-3.8-flash}
+  storage:
+    root-dir: ${STORAGE_ROOT_DIR:.data}
+    sample-assets-dir: ${SAMPLE_ASSETS_DIR:../src/assets/images}

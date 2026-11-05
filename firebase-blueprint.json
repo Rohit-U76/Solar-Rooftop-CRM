@@ -1,0 +1,482 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public workspace profile and role assignment for SuryaSetu users.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["HOMEOWNER", "SALES_STAFF", "ADMIN"] },
+        "activeWorkspace": { "type": "string", "enum": ["HOMEOWNER", "SALES"] },
+        "preferredLanguage": { "type": "string", "enum": ["en", "mr", "hi"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "role", "activeWorkspace", "preferredLanguage", "createdAt", "updatedAt"]
+    },
+    "UserPrivatePii": {
+      "title": "UserPrivatePii",
+      "description": "Isolated PII record for user contact details and DPDP Act 2023 consent.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "phone": { "type": "string", "maxLength": 20 },
+        "dpdpConsentAccepted": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "phone", "dpdpConsentAccepted", "createdAt", "updatedAt"]
+    },
+    "AdminRoleRecord": {
+      "title": "AdminRoleRecord",
+      "description": "Trusted RBAC administrator lookup entry.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "roleCode": { "type": "string", "enum": ["ADMIN", "SALES_STAFF"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "roleCode", "createdAt"]
+    },
+    "SolarLead": {
+      "title": "SolarLead",
+      "description": "Rooftop solar installation enquiry and qualification summary.",
+      "type": "object",
+      "properties": {
+        "leadNumber": { "type": "string", "minLength": 4, "maxLength": 24, "pattern": "^LD-[0-9]{4,8}$" },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "assignedStaffUids": { "type": "array", "description": "Bounded list of up to 10 assigned staff UIDs" },
+        "customerName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "ownershipType": { "type": "string", "enum": ["OWNER", "TENANT"] },
+        "roofType": { "type": "string", "enum": ["RCC", "METAL_SHEET", "TILED", "OTHER"] },
+        "rooftopAreaSqFt": { "type": "number" },
+        "avgMonthlyBillInr": { "type": "number" },
+        "averageUnitsKwh": { "type": "number" },
+        "sanctionedLoadKw": { "type": "number" },
+        "pincode": { "type": "string", "minLength": 6, "maxLength": 6, "pattern": "^[0-9]{6}$" },
+        "city": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "qualificationCategory": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW"] },
+        "leadScore": { "type": "number" },
+        "recommendedCapacityKw": { "type": "number" },
+        "recommendationLabel": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "surveyStatus": { "type": "string", "enum": ["PENDING_REVIEW", "CALL_SCHEDULED", "SURVEY_SCHEDULED", "SURVEY_COMPLETED", "HOLD_TENANT_CONSENT"] },
+        "leadStage": { "type": "string", "enum": ["NEW", "BILL_UPLOADED", "EXTRACTION_CONFIRMED", "QUALIFIED", "QUOTED", "CONVERTED"] },
+        "monthKey": { "type": "string", "minLength": 7, "maxLength": 7, "pattern": "^[0-9]{4}-[0-9]{2}$" },
+        "isSampleSeed": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "leadNumber", "ownerUid", "assignedStaffUids", "customerName", "ownershipType",
+        "roofType", "rooftopAreaSqFt", "avgMonthlyBillInr", "averageUnitsKwh", "sanctionedLoadKw",
+        "pincode", "city", "qualificationCategory", "leadScore", "recommendedCapacityKw",
+        "recommendationLabel", "surveyStatus", "leadStage", "monthKey", "isSampleSeed", "createdAt", "updatedAt"
+      ]
+    },
+    "LeadContactPii": {
+      "title": "LeadContactPii",
+      "description": "Isolated customer contact PII for a solar lead under DPDP Act 2023 controls.",
+      "type": "object",
+      "properties": {
+        "leadId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "assignedStaffUids": { "type": "array" },
+        "mobileNumber": { "type": "string", "minLength": 10, "maxLength": 15, "pattern": "^[6-9][0-9]{9}$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "dpdpConsent": { "type": "boolean" },
+        "retentionDays": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["leadId", "ownerUid", "assignedStaffUids", "mobileNumber", "email", "dpdpConsent", "retentionDays", "createdAt", "updatedAt"]
+    },
+    "ElectricityBill": {
+      "title": "ElectricityBill",
+      "description": "Uploaded electricity bill document metadata and protected server storage reference.",
+      "type": "object",
+      "properties": {
+        "leadId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "assignedStaffUids": { "type": "array" },
+        "fileName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "mimeType": { "type": "string", "enum": ["image/jpeg", "image/png", "image/webp"] },
+        "fileSizeBytes": { "type": "integer" },
+        "storageRef": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["leadId", "ownerUid", "assignedStaffUids", "fileName", "mimeType", "fileSizeBytes", "storageRef", "createdAt", "updatedAt"]
+    },
+    "BillExtraction": {
+      "title": "BillExtraction",
+      "description": "AI Vision extracted electricity bill fields and human verification record.",
+      "type": "object",
+      "properties": {
+        "leadId": { "type": "string", "maxLength": 128 },
+        "billId": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "assignedStaffUids": { "type": "array" },
+        "consumerNumber": { "type": "string", "maxLength": 60 },
+        "discomName": { "type": "string", "maxLength": 120 },
+        "tariffCategory": { "type": "string", "maxLength": 80 },
+        "sanctionedLoadKw": { "type": "number" },
+        "monthlyUnitsKwh": { "type": "number" },
+        "billingAmountInr": { "type": "number" },
+        "billingPeriod": { "type": "string", "maxLength": 80 },
+        "confidenceScore": { "type": "number" },
+        "clarityStatus": { "type": "string", "enum": ["CLEAR", "LOW_CONFIDENCE", "UNCLEAR_REUPLOAD"] },
+        "verificationStatus": { "type": "string", "enum": ["PENDING_VERIFICATION", "USER_CONFIRMED", "STAFF_VERIFIED", "REUPLOAD_REQUIRED"] },
+        "extractionNotes": { "type": "string", "maxLength": 600 },
+        "verifiedByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "leadId", "billId", "ownerUid", "assignedStaffUids", "consumerNumber", "discomName",
+        "tariffCategory", "sanctionedLoadKw", "monthlyUnitsKwh", "billingAmountInr", "billingPeriod",
+        "confidenceScore", "clarityStatus", "verificationStatus", "extractionNotes", "verifiedByUid", "createdAt", "updatedAt"
+      ]
+    },
+    "LeadScoreRecord": {
+      "title": "LeadScoreRecord",
+      "description": "Transparent deterministic + AI-explained lead qualification score and override history.",
+      "type": "object",
+      "properties": {
+        "leadId": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "assignedStaffUids": { "type": "array" },
+        "totalScore": { "type": "number" },
+        "category": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW"] },
+        "recommendedCapacityKw": { "type": "number" },
+        "recommendationLabel": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "ownershipPoints": { "type": "number" },
+        "billPoints": { "type": "number" },
+        "roofAreaPoints": { "type": "number" },
+        "loadPoints": { "type": "number" },
+        "pincodePoints": { "type": "number" },
+        "consumptionPoints": { "type": "number" },
+        "recommendationReason": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "nextRecommendedAction": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "isOverridden": { "type": "boolean" },
+        "overrideReason": { "type": "string", "maxLength": 500 },
+        "overriddenByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "leadId", "ownerUid", "assignedStaffUids", "totalScore", "category", "recommendedCapacityKw",
+        "recommendationLabel", "ownershipPoints", "billPoints", "roofAreaPoints", "loadPoints",
+        "pincodePoints", "consumptionPoints", "recommendationReason", "nextRecommendedAction",
+        "isOverridden", "overrideReason", "overriddenByUid", "createdAt", "updatedAt"
+      ]
+    },
+    "AdminConfigRule": {
+      "title": "AdminConfigRule",
+      "description": "Versioned historical configuration rule for solar panels, subsidies, installation pricing, and tariffs.",
+      "type": "object",
+      "properties": {
+        "ruleCategory": { "type": "string", "enum": ["SOLAR_OPTION", "SUBSIDY_RULE", "PRICING_RULE", "ELECTRICITY_TARIFF"] },
+        "workspaceScope": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "title": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "code": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "versionNumber": { "type": "integer" },
+        "effectiveFrom": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "effectiveTo": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "isActive": { "type": "boolean" },
+        "parameters": { "type": "object" },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ruleCategory", "workspaceScope", "title", "code", "versionNumber",
+        "effectiveFrom", "effectiveTo", "isActive", "parameters", "notes", "createdByUid", "createdAt", "updatedAt"
+      ]
+    },
+    "SolarQuotation": {
+      "title": "SolarQuotation",
+      "description": "Deterministic solar quotation with snapshotted historical subsidy and pricing rules.",
+      "type": "object",
+      "properties": {
+        "quotationNumber": { "type": "string", "minLength": 4, "maxLength": 32, "pattern": "^QT-[0-9A-Z\\-]+$" },
+        "leadId": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "assignedStaffUids": { "type": "array" },
+        "customerName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "city": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "pincode": { "type": "string", "minLength": 6, "maxLength": 6 },
+        "ownershipType": { "type": "string", "enum": ["OWNER", "TENANT"] },
+        "systemCapacityKw": { "type": "number" },
+        "panelTypeLabel": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "annualGenerationUnits": { "type": "number" },
+        "equipmentCostInr": { "type": "number" },
+        "installationChargesInr": { "type": "number" },
+        "totalInstallationCostInr": { "type": "number" },
+        "applicableSubsidyInr": { "type": "number" },
+        "netCustomerCostInr": { "type": "number" },
+        "electricityTariffInr": { "type": "number" },
+        "selfConsumptionUnits": { "type": "number" },
+        "estimatedAnnualSavingsInr": { "type": "number" },
+        "estimatedPaybackYears": { "type": "number" },
+        "quotationDate": { "type": "string", "minLength": 10, "maxLength": 10 },
+        "validUntilDate": { "type": "string", "minLength": 10, "maxLength": 10 },
+        "appliedRuleSnapshot": { "type": "object" },
+        "status": { "type": "string", "enum": ["DRAFT", "ISSUED", "APPROVED", "REJECTED", "CONVERTED"] },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "quotationNumber", "leadId", "ownerUid", "assignedStaffUids", "customerName", "city", "pincode",
+        "ownershipType", "systemCapacityKw", "panelTypeLabel", "annualGenerationUnits", "equipmentCostInr",
+        "installationChargesInr", "totalInstallationCostInr", "applicableSubsidyInr", "netCustomerCostInr",
+        "electricityTariffInr", "selfConsumptionUnits", "estimatedAnnualSavingsInr", "estimatedPaybackYears",
+        "quotationDate", "validUntilDate", "appliedRuleSnapshot", "status", "createdByUid", "createdAt", "updatedAt"
+      ]
+    },
+    "QuotationLineItem": {
+      "title": "QuotationLineItem",
+      "description": "Individual hardware or service line item inside a solar quotation.",
+      "type": "object",
+      "properties": {
+        "quotationId": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "assignedStaffUids": { "type": "array" },
+        "itemName": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "specification": { "type": "string", "minLength": 2, "maxLength": 240 },
+        "quantity": { "type": "number" },
+        "unitPriceInr": { "type": "number" },
+        "lineTotalInr": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["quotationId", "ownerUid", "assignedStaffUids", "itemName", "specification", "quantity", "unitPriceInr", "lineTotalInr", "createdAt"]
+    },
+    "SolarProject": {
+      "title": "SolarProject",
+      "description": "10-stage rooftop solar installation, net-metering, and subsidy tracking project.",
+      "type": "object",
+      "properties": {
+        "projectNumber": { "type": "string", "minLength": 4, "maxLength": 32, "pattern": "^PRJ-[0-9A-Z\\-]+$" },
+        "quotationId": { "type": "string", "maxLength": 128 },
+        "leadId": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "assignedStaffUids": { "type": "array" },
+        "customerName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "city": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "pincode": { "type": "string", "minLength": 6, "maxLength": 6 },
+        "systemCapacityKw": { "type": "number" },
+        "netCustomerCostInr": { "type": "number" },
+        "applicableSubsidyInr": { "type": "number" },
+        "currentStage": {
+          "type": "string",
+          "enum": [
+            "QUOTATION_APPROVED",
+            "ADVANCE_PAYMENT_RECEIVED",
+            "SITE_SURVEY_COMPLETED",
+            "INSTALLATION_SCHEDULED",
+            "INSTALLATION_IN_PROGRESS",
+            "INSTALLATION_COMPLETED",
+            "NET_METERING_DISCOM",
+            "SUBSIDY_SUBMITTED",
+            "SUBSIDY_CREDITED",
+            "PROJECT_COMPLETED"
+          ]
+        },
+        "stageIndex": { "type": "integer" },
+        "pendingActivities": { "type": "string", "maxLength": 400 },
+        "isDelayed": { "type": "boolean" },
+        "delayReason": { "type": "string", "maxLength": 300 },
+        "trackingToken": { "type": "string", "minLength": 24, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "stageStartedAt": { "type": "string", "maxLength": 40 },
+        "completionMonthKey": { "type": "string", "maxLength": 7 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "projectNumber", "quotationId", "leadId", "ownerUid", "assignedStaffUids", "customerName",
+        "city", "pincode", "systemCapacityKw", "netCustomerCostInr", "applicableSubsidyInr",
+        "currentStage", "stageIndex", "pendingActivities", "isDelayed", "delayReason",
+        "trackingToken", "stageStartedAt", "completionMonthKey", "createdAt", "updatedAt"
+      ]
+    },
+    "ProjectDocument": {
+      "title": "ProjectDocument",
+      "description": "Supporting installation, DISCOM net metering, or subsidy document record.",
+      "type": "object",
+      "properties": {
+        "projectId": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "assignedStaffUids": { "type": "array" },
+        "docTitle": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "docType": { "type": "string", "enum": ["SITE_SURVEY_REPORT", "SINGLE_LINE_DIAGRAM", "NET_METERING_APPLICATION", "SUBSIDY_VOUCHER", "COMMISSIONING_REPORT"] },
+        "fileName": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "fileSizeKb": { "type": "integer" },
+        "uploadedByUid": { "type": "string", "maxLength": 128 },
+        "notes": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["projectId", "ownerUid", "assignedStaffUids", "docTitle", "docType", "fileName", "fileSizeKb", "uploadedByUid", "notes", "createdAt"]
+    },
+    "ProjectPayment": {
+      "title": "ProjectPayment",
+      "description": "Simulated payment milestone record for a solar installation project.",
+      "type": "object",
+      "properties": {
+        "projectId": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "assignedStaffUids": { "type": "array" },
+        "paymentReference": { "type": "string", "minLength": 4, "maxLength": 48 },
+        "milestone": { "type": "string", "enum": ["ADVANCE_BOOKING", "STRUCTURE_DISPATCH", "FINAL_HANDOVER"] },
+        "amountInr": { "type": "number" },
+        "paymentMode": { "type": "string", "enum": ["SIMULATED_UPI", "SIMULATED_NEFT", "SIMULATED_CARD"] },
+        "isSimulation": { "type": "boolean" },
+        "recordedByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["projectId", "ownerUid", "assignedStaffUids", "paymentReference", "milestone", "amountInr", "paymentMode", "isSimulation", "recordedByUid", "createdAt"]
+    },
+    "ProjectStatusHistory": {
+      "title": "ProjectStatusHistory",
+      "description": "Immutable timestamped stage transition audit log for a solar project.",
+      "type": "object",
+      "properties": {
+        "projectId": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "assignedStaffUids": { "type": "array" },
+        "fromStage": { "type": "string", "maxLength": 60 },
+        "toStage": { "type": "string", "maxLength": 60 },
+        "stageIndex": { "type": "integer" },
+        "remarks": { "type": "string", "maxLength": 400 },
+        "updatedByUid": { "type": "string", "maxLength": 128 },
+        "updatedByName": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["projectId", "ownerUid", "assignedStaffUids", "fromStage", "toStage", "stageIndex", "remarks", "updatedByUid", "updatedByName", "createdAt"]
+    },
+    "PublicProjectTracking": {
+      "title": "PublicProjectTracking",
+      "description": "Sanitized PII-free projection accessible via unguessable customer status token.",
+      "type": "object",
+      "properties": {
+        "trackingToken": { "type": "string", "minLength": 24, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "projectId": { "type": "string", "maxLength": 128 },
+        "projectNumber": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "customerMask": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "city": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "systemCapacityKw": { "type": "number" },
+        "currentStage": { "type": "string", "maxLength": 60 },
+        "stageIndex": { "type": "integer" },
+        "completedStageIndices": { "type": "array" },
+        "pendingActivities": { "type": "string", "maxLength": 400 },
+        "isDelayed": { "type": "boolean" },
+        "delaySummary": { "type": "string", "maxLength": 300 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "assignedStaffUids": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "trackingToken", "projectId", "projectNumber", "customerMask", "city",
+        "systemCapacityKw", "currentStage", "stageIndex", "completedStageIndices",
+        "pendingActivities", "isDelayed", "delaySummary", "ownerUid", "assignedStaffUids", "createdAt", "updatedAt"
+      ]
+    },
+    "NotificationRecord": {
+      "title": "NotificationRecord",
+      "description": "In-app and simulated WhatsApp/SMS notification event record.",
+      "type": "object",
+      "properties": {
+        "recipientUid": { "type": "string", "maxLength": 128 },
+        "assignedStaffUids": { "type": "array" },
+        "channel": { "type": "string", "enum": ["WHATSAPP_SIMULATION", "SMS_SIMULATION", "IN_APP"] },
+        "eventType": { "type": "string", "enum": ["LEAD_CREATED", "BILL_VERIFIED", "LEAD_SCORED", "QUOTATION_ISSUED", "QUOTATION_APPROVED", "PAYMENT_SIMULATED", "PROJECT_STAGE_UPDATED"] },
+        "referenceCode": { "type": "string", "minLength": 2, "maxLength": 40 },
+        "maskedRecipientPhone": { "type": "string", "maxLength": 20 },
+        "title": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "message": { "type": "string", "minLength": 2, "maxLength": 600 },
+        "isRead": { "type": "boolean" },
+        "isSimulation": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "recipientUid", "assignedStaffUids", "channel", "eventType", "referenceCode",
+        "maskedRecipientPhone", "title", "message", "isRead", "isSimulation", "createdAt", "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User workspace profiles and RBAC role descriptors."
+    },
+    "/user_private/{userId}": {
+      "schema": { "$ref": "#/entities/UserPrivatePii" },
+      "description": "Isolated PII storage for authenticated user contact details and DPDP consent."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminRoleRecord" },
+      "description": "Trusted admin and sales staff privilege registry."
+    },
+    "/leads/{leadId}": {
+      "schema": { "$ref": "#/entities/SolarLead" },
+      "description": "Solar installation enquiries and qualification status."
+    },
+    "/lead_contacts/{leadId}": {
+      "schema": { "$ref": "#/entities/LeadContactPii" },
+      "description": "Isolated PII contact details linked 1:1 to a solar lead."
+    },
+    "/electricity_bills/{billId}": {
+      "schema": { "$ref": "#/entities/ElectricityBill" },
+      "description": "Metadata and protected server storage keys for customer electricity bills."
+    },
+    "/bill_extractions/{extractionId}": {
+      "schema": { "$ref": "#/entities/BillExtraction" },
+      "description": "Gemini Vision bill extraction records and verification states."
+    },
+    "/lead_scores/{scoreId}": {
+      "schema": { "$ref": "#/entities/LeadScoreRecord" },
+      "description": "Lead qualification scores, capacity sizing, and staff override records."
+    },
+    "/admin_rules/{ruleId}": {
+      "schema": { "$ref": "#/entities/AdminConfigRule" },
+      "description": "Versioned historical configuration rules for panels, subsidies, installation pricing, and tariffs."
+    },
+    "/quotations/{quotationId}": {
+      "schema": { "$ref": "#/entities/SolarQuotation" },
+      "description": "Solar quotations with immutable applied rule snapshots."
+    },
+    "/quotations/{quotationId}/items/{itemId}": {
+      "schema": { "$ref": "#/entities/QuotationLineItem" },
+      "description": "Hardware and installation line items belonging to a solar quotation."
+    },
+    "/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/SolarProject" },
+      "description": "10-stage rooftop solar installation and subsidy projects."
+    },
+    "/projects/{projectId}/documents/{docId}": {
+      "schema": { "$ref": "#/entities/ProjectDocument" },
+      "description": "Supporting engineering, net metering, and subsidy documents."
+    },
+    "/projects/{projectId}/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/ProjectPayment" },
+      "description": "Simulated payment milestone records for a project."
+    },
+    "/projects/{projectId}/history/{historyId}": {
+      "schema": { "$ref": "#/entities/ProjectStatusHistory" },
+      "description": "Immutable stage transition history for a solar project."
+    },
+    "/public_tracking/{trackingToken}": {
+      "schema": { "$ref": "#/entities/PublicProjectTracking" },
+      "description": "PII-free project tracking status keyed by unguessable customer tokens."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/NotificationRecord" },
+      "description": "In-app and simulated WhatsApp/SMS notifications."
+    }
+  }
+}

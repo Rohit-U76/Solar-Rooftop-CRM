@@ -1,0 +1,46 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: suryasetu-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: suryasetu_db
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-suryasetu_root_2026}
+      MYSQL_USER: ${MYSQL_USER:-suryasetu_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-suryasetu_pass_2026}
+    ports:
+      - "3306:3306"
+    volumes:
+      - suryasetu_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: suryasetu-spring-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      PORT: 8080
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/suryasetu_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Kolkata
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-suryasetu_user}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-suryasetu_pass_2026}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-data-atom-n01dl}
+      JWT_SECRET: ${JWT_SECRET:-SuryaSetuVidarbhaNagpurSolarJwtSecretKey2026Minimum32BytesLong!}
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-http://localhost:3000,http://localhost:5173}
+    ports:
+      - "8080:8080"
+    volumes:
+      - suryasetu_file_storage:/app/.data
+
+volumes:
+  suryasetu_mysql_data:
+  suryasetu_file_storage:
