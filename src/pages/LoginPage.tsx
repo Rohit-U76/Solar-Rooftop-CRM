@@ -9,6 +9,7 @@ import {
   EyeOff,
   Loader2,
   MailCheck,
+  Moon,
   RefreshCw,
   ShieldCheck,
   Sun,
@@ -76,6 +77,8 @@ export function LoginPage() {
   const {
     firebaseUser,
     needsEmailVerification,
+    theme,
+    toggleTheme,
     signInWithGoogle,
     signInWithEmail,
     signUpWithEmail,
@@ -296,38 +299,38 @@ export function LoginPage() {
   const isBusy = submittingEmail || submittingGoogle || checkingVerify || resendingVerify;
 
   return (
-    <div className="min-h-screen bg-white text-slate-900 flex flex-col">
+    <div className="min-h-screen bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col">
       {/* 3-Zone Top Bar Contract */}
-      <header className="border-b border-slate-200 px-6 lg:px-12 py-4 flex items-center justify-between gap-8">
+      <header className="border-b border-slate-200 dark:border-slate-800 px-6 lg:px-12 py-4 flex items-center justify-between gap-8">
         <a
           href="#top"
-          className="text-lg font-bold tracking-tight text-emerald-950 whitespace-nowrap shrink-0"
+          className="text-lg font-bold tracking-tight text-emerald-950 dark:text-emerald-300 whitespace-nowrap shrink-0"
         >
           SuryaSetu
         </a>
 
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
+        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600 dark:text-slate-400">
           <a
             href="#workflow"
-            className="hover:text-emerald-950 transition-colors whitespace-nowrap shrink-0"
+            className="hover:text-emerald-950 dark:hover:text-emerald-300 transition-colors whitespace-nowrap shrink-0"
           >
             Workflow
           </a>
           <a
             href="#estimator"
-            className="hover:text-emerald-950 transition-colors whitespace-nowrap shrink-0"
+            className="hover:text-emerald-950 dark:hover:text-emerald-300 transition-colors whitespace-nowrap shrink-0"
           >
             Subsidy Estimator
           </a>
           <a
             href="#track"
-            className="hover:text-emerald-950 transition-colors whitespace-nowrap shrink-0"
+            className="hover:text-emerald-950 dark:hover:text-emerald-300 transition-colors whitespace-nowrap shrink-0"
           >
             Track Installation
           </a>
           <a
             href="#coverage"
-            className="hover:text-emerald-950 transition-colors whitespace-nowrap shrink-0"
+            className="hover:text-emerald-950 dark:hover:text-emerald-300 transition-colors whitespace-nowrap shrink-0"
           >
             Vidarbha Coverage
           </a>
@@ -337,14 +340,14 @@ export function LoginPage() {
           <button
             type="button"
             onClick={() => focusAuthCard('SIGN_IN')}
-            className="px-3.5 py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="px-3.5 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             Sign In
           </button>
           <button
             type="button"
             onClick={() => focusAuthCard('SIGN_UP')}
-            className="px-4 py-2 text-xs font-semibold text-white bg-emerald-900 rounded-lg hover:bg-emerald-950 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="px-4 py-2 text-xs font-semibold text-white bg-emerald-900 dark:bg-emerald-700 rounded-lg hover:bg-emerald-950 dark:hover:bg-emerald-600 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             Sign Up
           </button>
@@ -357,16 +360,16 @@ export function LoginPage() {
           {/* Left 7 Columns: Value Proposition, Quick Role Triggers & Nagpur Solar Showcase */}
           <div className="lg:col-span-7 flex flex-col justify-between space-y-6">
             <div>
-              <p className="text-xs font-medium text-emerald-900 mb-3">
+              <p className="text-xs font-medium text-emerald-900 dark:text-emerald-400 mb-3">
                 Nagpur & Vidarbha Rooftop Solar EPC Platform · MNRE Turnkey Workflow
               </p>
               <h1
-                className="text-3xl sm:text-4xl lg:text-[2.6rem] font-bold text-slate-900 leading-[1.15] mb-4 max-w-2xl"
+                className="text-3xl sm:text-4xl lg:text-[2.6rem] font-bold text-slate-900 dark:text-slate-100 leading-[1.15] mb-4 max-w-2xl"
                 style={{ textWrap: 'balance' }}
               >
                 AI Electricity Bill Reading, Transparent Sizing & Solar Project Tracking
               </h1>
-              <p className="text-base text-slate-600 leading-relaxed max-w-xl">
+              <p className="text-base text-slate-600 dark:text-slate-400 leading-relaxed max-w-xl">
                 Digitizing rooftop solar enquiries across Nagpur, Wardha, Amravati, Akola, and
                 Chandrapur. Homeowners receive instant consumption verification and deterministic
                 subsidy proposals; sales teams qualify 1,400+ monthly leads without spreadsheet
@@ -376,7 +379,7 @@ export function LoginPage() {
 
             {/* Rooftop Installation Visual */}
             {!heroImgFailed ? (
-              <div className="relative w-full rounded-xl overflow-hidden border border-slate-200 bg-slate-100 h-64 sm:h-72">
+              <div className="relative w-full rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 h-64 sm:h-72">
                 <img
                   src={SAMPLE_BILL_ASSETS.hero}
                   alt="Modern residential RCC rooftop solar plant installed in Nagpur, Maharashtra"
@@ -394,7 +397,7 @@ export function LoginPage() {
                 </div>
               </div>
             ) : (
-              <div className="w-full rounded-xl border border-slate-200 bg-emerald-950 text-white p-7 flex flex-col justify-between h-60">
+              <div className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-emerald-950 text-white p-7 flex flex-col justify-between h-60">
                 <Sun className="w-9 h-9 text-emerald-300" />
                 <div>
                   <div className="text-lg font-semibold mb-1">
@@ -408,7 +411,7 @@ export function LoginPage() {
               </div>
             )}
 
-            <div className="pt-3 border-t border-slate-200 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
               <span>Email/Password & Google Sign-In</span>
               <span aria-hidden="true">·</span>
               <span>Deterministic Backend Subsidy Math</span>
@@ -421,31 +424,60 @@ export function LoginPage() {
           <div
             id="auth-panel"
             ref={authPanelRef}
-            className="lg:col-span-5 bg-white border border-slate-200 rounded-xl p-6 sm:p-7"
+            className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 sm:p-7"
           >
+            {/* Card Utility Row: Portal Access + Light/Dark Theme Toggle */}
+            <div className="flex items-center justify-between gap-3 pb-3 mb-4 border-b border-slate-100 dark:border-slate-800">
+              <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+                SuryaSetu Workspace Access
+              </span>
+              <button
+                type="button"
+                onClick={toggleTheme}
+                aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                {theme === 'dark' ? (
+                  <>
+                    <Sun className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Light</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="w-3.5 h-3.5 text-slate-600" />
+                    <span>Dark</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             {needsEmailVerification && firebaseUser ? (
               /* Email Verification Gate View */
               <div className="space-y-5">
-                <div className="flex items-center gap-2.5 text-emerald-900">
+                <div className="flex items-center gap-2.5 text-emerald-900 dark:text-emerald-400">
                   <MailCheck className="w-5 h-5 shrink-0" />
-                  <h2 className="text-lg font-bold text-slate-900">Verify Your Email Address</h2>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                    Verify Your Email Address
+                  </h2>
                 </div>
 
-                <p className="text-xs text-slate-600 leading-relaxed">
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
                   We sent a verification link to{' '}
-                  <span className="font-semibold text-slate-900">{firebaseUser.email}</span>.
-                  SuryaSetu enforces verified-email security rules to protect customer electricity
+                  <span className="font-semibold text-slate-900 dark:text-slate-100">
+                    {firebaseUser.email}
+                  </span>
+                  . SuryaSetu enforces verified-email security rules to protect customer electricity
                   bills and subsidy quotations.
                 </p>
 
                 {authNotice && (
-                  <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
+                  <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-900 dark:text-emerald-200">
                     {authNotice}
                   </div>
                 )}
 
                 {authError && (
-                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800">
+                  <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 text-xs text-red-800 dark:text-red-200">
                     {authError}
                   </div>
                 )}
@@ -455,7 +487,7 @@ export function LoginPage() {
                     type="button"
                     onClick={() => void handleCheckEmailVerified()}
                     disabled={isBusy}
-                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-900 rounded-lg hover:bg-emerald-950 transition-colors cursor-pointer disabled:opacity-60"
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-900 dark:bg-emerald-700 rounded-lg hover:bg-emerald-950 dark:hover:bg-emerald-600 transition-colors cursor-pointer disabled:opacity-60"
                   >
                     {checkingVerify ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -469,17 +501,17 @@ export function LoginPage() {
                     type="button"
                     onClick={() => void handleResendVerification()}
                     disabled={isBusy}
-                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-800 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer disabled:opacity-60"
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer disabled:opacity-60"
                   >
                     {resendingVerify ? 'Sending...' : 'Resend Verification Email'}
                   </button>
                 </div>
 
-                <div className="pt-4 border-t border-slate-100 text-center">
+                <div className="pt-4 border-t border-slate-100 dark:border-slate-800 text-center">
                   <button
                     type="button"
                     onClick={() => void handleSwitchAccountOrGoogle()}
-                    className="text-xs font-medium text-slate-500 hover:text-slate-900 underline underline-offset-4 cursor-pointer"
+                    className="text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 underline underline-offset-4 cursor-pointer"
                   >
                     Sign out or use Continue with Google instead
                   </button>
@@ -489,7 +521,7 @@ export function LoginPage() {
               /* Standard Sign In / Sign Up / Password Reset + Google OAuth View */
               <div>
                 {/* Segmented Sign In / Sign Up Tabs */}
-                <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-lg mb-5">
+                <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg mb-5">
                   <button
                     type="button"
                     onClick={() => {
@@ -499,8 +531,8 @@ export function LoginPage() {
                     }}
                     className={`py-2 px-3 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
                       authTab !== 'SIGN_UP'
-                        ? 'bg-white text-slate-900 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
                     }`}
                   >
                     Sign In
@@ -514,8 +546,8 @@ export function LoginPage() {
                     }}
                     className={`py-2 px-3 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
                       authTab === 'SIGN_UP'
-                        ? 'bg-white text-slate-900 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
                     }`}
                   >
                     Sign Up
@@ -525,7 +557,7 @@ export function LoginPage() {
                 {/* Workspace Role Selector */}
                 {authTab !== 'FORGOT_PASSWORD' && (
                   <div className="mb-5">
-                    <div className="text-xs font-semibold text-slate-700 mb-2">
+                    <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
                       Select Portal Workspace
                     </div>
                     <div className="grid grid-cols-2 gap-2">
@@ -534,8 +566,8 @@ export function LoginPage() {
                         onClick={() => setSelectedWorkspace('HOMEOWNER')}
                         className={`py-2 px-3 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
                           selectedWorkspace === 'HOMEOWNER'
-                            ? 'border-emerald-900 bg-emerald-50/70 text-emerald-950'
-                            : 'border-slate-200 bg-white text-slate-600 hover:text-slate-900'
+                            ? 'border-emerald-900 dark:border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/50 text-emerald-950 dark:text-emerald-200'
+                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
                         }`}
                       >
                         Homeowner Portal
@@ -545,14 +577,14 @@ export function LoginPage() {
                         onClick={() => setSelectedWorkspace('SALES')}
                         className={`py-2 px-3 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
                           selectedWorkspace === 'SALES'
-                            ? 'border-emerald-900 bg-emerald-50/70 text-emerald-950'
-                            : 'border-slate-200 bg-white text-slate-600 hover:text-slate-900'
+                            ? 'border-emerald-900 dark:border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/50 text-emerald-950 dark:text-emerald-200'
+                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
                         }`}
                       >
                         Sales Staff Console
                       </button>
                     </div>
-                    <p className="text-[11px] text-slate-500 mt-1.5">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5">
                       {selectedWorkspace === 'HOMEOWNER'
                         ? 'Submit MSEDCL bills, verify units, download quotes, and track installation.'
                         : 'Manage Vidarbha leads, verify AI scans, issue PDF quotes, and update 10 stages.'}
@@ -561,13 +593,13 @@ export function LoginPage() {
                 )}
 
                 {authNotice && (
-                  <div className="mb-4 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
+                  <div className="mb-4 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-900 dark:text-emerald-200">
                     {authNotice}
                   </div>
                 )}
 
                 {authError && (
-                  <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800">
+                  <div className="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 text-xs text-red-800 dark:text-red-200">
                     {authError}
                   </div>
                 )}
@@ -578,7 +610,7 @@ export function LoginPage() {
                     <div>
                       <label
                         htmlFor="auth-fullname"
-                        className="block text-xs font-medium text-slate-700 mb-1"
+                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
                       >
                         Full Name
                       </label>
@@ -590,7 +622,7 @@ export function LoginPage() {
                         value={fullName}
                         onChange={(e) => setFullName(e.target.value)}
                         placeholder="e.g. Prashant Wankhede"
-                        className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:border-emerald-800"
+                        className="w-full px-3.5 py-2.5 text-sm bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-emerald-800 dark:focus:border-emerald-500"
                       />
                     </div>
                   )}
@@ -598,7 +630,7 @@ export function LoginPage() {
                   <div>
                     <label
                       htmlFor="auth-email"
-                      className="block text-xs font-medium text-slate-700 mb-1"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
                     >
                       Email Address
                     </label>
@@ -610,7 +642,7 @@ export function LoginPage() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="you@example.com"
-                      className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:border-emerald-800"
+                      className="w-full px-3.5 py-2.5 text-sm bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-emerald-800 dark:focus:border-emerald-500"
                     />
                   </div>
 
@@ -619,7 +651,7 @@ export function LoginPage() {
                       <div className="flex items-center justify-between mb-1">
                         <label
                           htmlFor="auth-password"
-                          className="block text-xs font-medium text-slate-700"
+                          className="block text-xs font-medium text-slate-700 dark:text-slate-300"
                         >
                           Password
                         </label>
@@ -631,7 +663,7 @@ export function LoginPage() {
                               setAuthError('');
                               setAuthNotice('');
                             }}
-                            className="text-xs font-medium text-emerald-900 hover:underline cursor-pointer"
+                            className="text-xs font-medium text-emerald-900 dark:text-emerald-400 hover:underline cursor-pointer"
                           >
                             Forgot password?
                           </button>
@@ -653,13 +685,13 @@ export function LoginPage() {
                               ? 'Minimum 6 characters'
                               : 'Enter your password'
                           }
-                          className="w-full pl-3.5 pr-10 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:border-emerald-800"
+                          className="w-full pl-3.5 pr-10 py-2.5 text-sm bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-emerald-800 dark:focus:border-emerald-500"
                         />
                         <button
                           type="button"
                           onClick={() => setShowPassword((prev) => !prev)}
                           aria-label={showPassword ? 'Hide password' : 'Show password'}
-                          className="absolute inset-y-0 right-0 px-3 flex items-center text-slate-400 hover:text-slate-700 cursor-pointer"
+                          className="absolute inset-y-0 right-0 px-3 flex items-center text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
                         >
                           {showPassword ? (
                             <EyeOff className="w-4 h-4" />
@@ -675,7 +707,7 @@ export function LoginPage() {
                     <div>
                       <label
                         htmlFor="auth-confirm-password"
-                        className="block text-xs font-medium text-slate-700 mb-1"
+                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
                       >
                         Confirm Password
                       </label>
@@ -688,7 +720,7 @@ export function LoginPage() {
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
                         placeholder="Re-enter password"
-                        className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:border-emerald-800"
+                        className="w-full px-3.5 py-2.5 text-sm bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-emerald-800 dark:focus:border-emerald-500"
                       />
                     </div>
                   )}
@@ -696,7 +728,7 @@ export function LoginPage() {
                   <button
                     type="submit"
                     disabled={isBusy}
-                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-900 rounded-lg hover:bg-emerald-950 transition-colors cursor-pointer disabled:opacity-60"
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-emerald-900 dark:bg-emerald-700 rounded-lg hover:bg-emerald-950 dark:hover:bg-emerald-600 transition-colors cursor-pointer disabled:opacity-60"
                   >
                     {submittingEmail && <Loader2 className="w-4 h-4 animate-spin" />}
                     {authTab === 'SIGN_IN' &&
@@ -716,7 +748,7 @@ export function LoginPage() {
                           setAuthTab('SIGN_IN');
                           setAuthError('');
                         }}
-                        className="text-xs font-medium text-slate-600 hover:text-slate-900 underline underline-offset-4 cursor-pointer"
+                        className="text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 underline underline-offset-4 cursor-pointer"
                       >
                         Back to Sign In
                       </button>
@@ -729,10 +761,12 @@ export function LoginPage() {
                   <>
                     <div className="relative my-5">
                       <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                        <div className="w-full border-t border-slate-200" />
+                        <div className="w-full border-t border-slate-200 dark:border-slate-800" />
                       </div>
                       <div className="relative flex justify-center text-xs">
-                        <span className="bg-white px-3 text-slate-400">or continue with</span>
+                        <span className="bg-white dark:bg-slate-900 px-3 text-slate-400 dark:text-slate-500">
+                          or continue with
+                        </span>
                       </div>
                     </div>
 
@@ -740,10 +774,10 @@ export function LoginPage() {
                       type="button"
                       onClick={() => void handleGoogleAuth()}
                       disabled={isBusy}
-                      className="w-full inline-flex items-center justify-center gap-2.5 px-4 py-2.5 text-xs font-semibold text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-60"
+                      className="w-full inline-flex items-center justify-center gap-2.5 px-4 py-2.5 text-xs font-semibold text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer disabled:opacity-60"
                     >
                       {submittingGoogle ? (
-                        <Loader2 className="w-4 h-4 animate-spin text-slate-600" />
+                        <Loader2 className="w-4 h-4 animate-spin text-slate-600 dark:text-slate-300" />
                       ) : (
                         <GoogleBrandMark />
                       )}
@@ -752,7 +786,7 @@ export function LoginPage() {
                       </span>
                     </button>
 
-                    <p className="text-[11px] text-slate-500 text-center mt-4">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 text-center mt-4">
                       {authTab === 'SIGN_IN' ? (
                         <>
                           New to SuryaSetu?{' '}
@@ -763,7 +797,7 @@ export function LoginPage() {
                               setAuthError('');
                               setAuthNotice('');
                             }}
-                            className="font-semibold text-emerald-900 hover:underline cursor-pointer"
+                            className="font-semibold text-emerald-900 dark:text-emerald-400 hover:underline cursor-pointer"
                           >
                             Create an account
                           </button>
@@ -778,7 +812,7 @@ export function LoginPage() {
                               setAuthError('');
                               setAuthNotice('');
                             }}
-                            className="font-semibold text-emerald-900 hover:underline cursor-pointer"
+                            className="font-semibold text-emerald-900 dark:text-emerald-400 hover:underline cursor-pointer"
                           >
                             Sign in
                           </button>
@@ -795,43 +829,49 @@ export function LoginPage() {
         {/* Full-Width 4-Column Operational Proof Row */}
         <div
           id="workflow"
-          className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-8 border-t border-slate-200"
+          className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-8 border-t border-slate-200 dark:border-slate-800"
         >
-          <div className="p-4 rounded-xl border border-slate-200 bg-white">
-            <div className="font-mono tabular-nums text-2xl font-bold text-emerald-900 mb-1">
+          <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+            <div className="font-mono tabular-nums text-2xl font-bold text-emerald-900 dark:text-emerald-400 mb-1">
               &lt; 15%
             </div>
-            <div className="text-xs font-semibold text-slate-900">
+            <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
               Unqualified Physical Surveys
             </div>
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               Reduced from 40% baseline by screening tenant NOC & low-consumption bills upfront.
             </p>
           </div>
-          <div className="p-4 rounded-xl border border-slate-200 bg-white">
-            <div className="font-mono tabular-nums text-2xl font-bold text-emerald-900 mb-1">
+          <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+            <div className="font-mono tabular-nums text-2xl font-bold text-emerald-900 dark:text-emerald-400 mb-1">
               90%+
             </div>
-            <div className="text-xs font-semibold text-slate-900">Same-Day PDF Quotations</div>
-            <p className="text-xs text-slate-500 mt-1">
+            <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+              Same-Day PDF Quotations
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               Versioned panel, BOS, and sample subsidy rules generate locked proposals in seconds.
             </p>
           </div>
-          <div className="p-4 rounded-xl border border-slate-200 bg-white">
-            <div className="font-mono tabular-nums text-2xl font-bold text-emerald-900 mb-1">
+          <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+            <div className="font-mono tabular-nums text-2xl font-bold text-emerald-900 dark:text-emerald-400 mb-1">
               -50%
             </div>
-            <div className="text-xs font-semibold text-slate-900">Status Follow-Up Calls</div>
-            <p className="text-xs text-slate-500 mt-1">
+            <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+              Status Follow-Up Calls
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               Customers track 10 installation, DISCOM net-meter, and subsidy stages via token link.
             </p>
           </div>
-          <div className="p-4 rounded-xl border border-slate-200 bg-white">
-            <div className="font-mono tabular-nums text-2xl font-bold text-emerald-900 mb-1">
+          <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+            <div className="font-mono tabular-nums text-2xl font-bold text-emerald-900 dark:text-emerald-400 mb-1">
               1,400 kWh
             </div>
-            <div className="text-xs font-semibold text-slate-900">Per kW Annual Yield</div>
-            <p className="text-xs text-slate-500 mt-1">
+            <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+              Per kW Annual Yield
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               Calibrated for central Indian solar insolation across Nagpur & Vidarbha rooftops.
             </p>
           </div>
@@ -839,27 +879,33 @@ export function LoginPage() {
       </section>
 
       {/* Interactive Deterministic Subsidy & Payback Preview + Token Tracker */}
-      <section id="estimator" className="bg-slate-50 border-y border-slate-200 py-12 px-6 lg:px-12">
+      <section
+        id="estimator"
+        className="bg-slate-50 dark:bg-slate-900/50 border-y border-slate-200 dark:border-slate-800 py-12 px-6 lg:px-12"
+      >
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
-          <div className="lg:col-span-7 bg-white border border-slate-200 rounded-xl p-6">
-            <div className="flex items-center gap-2 text-emerald-900 text-xs font-semibold mb-2">
+          <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
+            <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-400 text-xs font-semibold mb-2">
               <Calculator className="w-4 h-4" />
               Instant Deterministic Sizing & Sample Subsidy Preview
             </div>
-            <h2 className="text-xl font-bold text-slate-900 mb-1">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-1">
               Check Recommended Rooftop Capacity Before Signing In
             </h2>
-            <p className="text-xs text-slate-500 mb-6">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-6">
               Uses SuryaSetu’s exact deterministic formulas (1,400 units/kW/year; configurable
               sample slab up to ₹78,000).
             </p>
 
             <div className="mb-6">
               <div className="flex items-center justify-between text-sm mb-2">
-                <label htmlFor="bill-slider" className="font-medium text-slate-700">
+                <label
+                  htmlFor="bill-slider"
+                  className="font-medium text-slate-700 dark:text-slate-300"
+                >
                   Average Monthly Electricity Bill
                 </label>
-                <span className="font-mono tabular-nums font-bold text-emerald-900 text-base">
+                <span className="font-mono tabular-nums font-bold text-emerald-900 dark:text-emerald-400 text-base">
                   ₹{estBill.toLocaleString('en-IN')} / month
                 </span>
               </div>
@@ -871,42 +917,42 @@ export function LoginPage() {
                 step={100}
                 value={estBill}
                 onChange={(e) => setEstBill(Number(e.target.value))}
-                className="w-full accent-emerald-900 cursor-pointer"
+                className="w-full accent-emerald-900 dark:accent-emerald-500 cursor-pointer"
               />
-              <div className="flex justify-between text-xs text-slate-400 font-mono tabular-nums mt-1">
+              <div className="flex justify-between text-xs text-slate-400 dark:text-slate-500 font-mono tabular-nums mt-1">
                 <span>₹600</span>
                 <span>₹3,200 (Typical 3BHK)</span>
                 <span>₹10,000</span>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4 border-t border-slate-100">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
               <div>
-                <div className="text-xs text-slate-500">Recommended Size</div>
-                <div className="font-mono tabular-nums text-lg font-bold text-slate-900 mt-0.5">
+                <div className="text-xs text-slate-500 dark:text-slate-400">Recommended Size</div>
+                <div className="font-mono tabular-nums text-lg font-bold text-slate-900 dark:text-slate-100 mt-0.5">
                   {estKw} kW
                 </div>
               </div>
               <div>
-                <div className="text-xs text-slate-500">Sample Subsidy*</div>
-                <div className="font-mono tabular-nums text-lg font-bold text-emerald-800 mt-0.5">
+                <div className="text-xs text-slate-500 dark:text-slate-400">Sample Subsidy*</div>
+                <div className="font-mono tabular-nums text-lg font-bold text-emerald-800 dark:text-emerald-400 mt-0.5">
                   ₹{estQuote.applicableSubsidyInr.toLocaleString('en-IN')}
                 </div>
               </div>
               <div>
-                <div className="text-xs text-slate-500">Est. Net Cost</div>
-                <div className="font-mono tabular-nums text-lg font-bold text-slate-900 mt-0.5">
+                <div className="text-xs text-slate-500 dark:text-slate-400">Est. Net Cost</div>
+                <div className="font-mono tabular-nums text-lg font-bold text-slate-900 dark:text-slate-100 mt-0.5">
                   ₹{estQuote.netCustomerCostInr.toLocaleString('en-IN')}
                 </div>
               </div>
               <div>
-                <div className="text-xs text-slate-500">Est. Payback</div>
-                <div className="font-mono tabular-nums text-lg font-bold text-slate-900 mt-0.5">
+                <div className="text-xs text-slate-500 dark:text-slate-400">Est. Payback</div>
+                <div className="font-mono tabular-nums text-lg font-bold text-slate-900 dark:text-slate-100 mt-0.5">
                   {estQuote.estimatedPaybackYears} yrs
                 </div>
               </div>
             </div>
-            <p className="text-[11px] text-slate-400 mt-4">
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-4">
               *Sample subsidy rule shown for illustration (₹30,000/kW first 2 kW + ₹18,000 3rd kW,
               max ₹78,000). Actual government DBT rules are verified by date at quotation issuance.
             </p>
@@ -915,17 +961,17 @@ export function LoginPage() {
           {/* Secure Customer Project Status Lookup */}
           <div
             id="track"
-            className="lg:col-span-5 bg-white border border-slate-200 rounded-xl p-6 flex flex-col justify-between"
+            className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 flex flex-col justify-between"
           >
             <div>
-              <div className="flex items-center gap-2 text-slate-700 text-xs font-semibold mb-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-800" />
+              <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300 text-xs font-semibold mb-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-800 dark:text-emerald-400" />
                 Zero-Login Customer Status Link
               </div>
-              <h2 className="text-xl font-bold text-slate-900 mb-2">
+              <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-2">
                 Track Existing Rooftop Installation
               </h2>
-              <p className="text-xs text-slate-600 leading-relaxed mb-5">
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed mb-5">
                 Received a secure tracking token via SuryaSetu WhatsApp or SMS? Enter your token
                 below to view authorized milestone progress without exposing personal billing data.
               </p>
@@ -936,11 +982,11 @@ export function LoginPage() {
                   value={trackingInput}
                   onChange={(e) => setTrackingInput(e.target.value)}
                   placeholder="e.g. trk_ngp30881_..."
-                  className="w-full px-3.5 py-2.5 text-sm font-mono bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-emerald-800"
+                  className="w-full px-3.5 py-2.5 text-sm font-mono bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-emerald-800 dark:focus:border-emerald-500"
                 />
                 <button
                   type="submit"
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-900 bg-slate-100 border border-slate-200 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
                 >
                   Open Secure Project Status
                   <ExternalLink className="w-3.5 h-3.5" />
@@ -950,11 +996,13 @@ export function LoginPage() {
 
             <div
               id="coverage"
-              className="pt-5 mt-6 border-t border-slate-100 text-xs text-slate-500 space-y-1.5"
+              className="pt-5 mt-6 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 space-y-1.5"
             >
-              <div className="font-semibold text-slate-700">Active Vidarbha EPC Service Clusters</div>
+              <div className="font-semibold text-slate-700 dark:text-slate-300">
+                Active Vidarbha EPC Service Clusters
+              </div>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-800 shrink-0" />
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-800 dark:text-emerald-400 shrink-0" />
                 <span>
                   Nagpur Urban & Hingna (440xxx / 441xxx) · Wardha · Amravati · Akola · Chandrapur
                 </span>
@@ -964,7 +1012,7 @@ export function LoginPage() {
         </div>
       </section>
 
-      <footer className="mt-auto px-6 lg:px-12 py-6 text-xs text-slate-500 flex flex-wrap items-center justify-between gap-4">
+      <footer className="mt-auto px-6 lg:px-12 py-6 text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center justify-between gap-4">
         <span>© 2026 SuryaSetu Solar EPC Solutions · Nagpur, Maharashtra</span>
         <span>Protected by Zero-Trust Access Controls & DPDP Act 2023 Data Minimization</span>
       </footer>

@@ -1,9 +1,66 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import {
+  buildMultiOptionComparison,
+  type QuotationComparisonOption,
+} from '../shared/solarEngine.ts';
 import type { QuotationLineItemDoc, SolarQuotationDoc } from '../types/domain.ts';
 
 function formatInr(amount: number): string {
   return `INR ${Math.round(amount).toLocaleString('en-IN')}`;
+}
+
+/**
+ * Deterministically reconstructs the 1 kW, 2 kW, 3 kW, and Suitable Alternative options
+ * from the quotation's immutable `appliedRuleSnapshot` so historical proposals preserve
+ * their locked pricing and subsidy math even after admin rules change.
+ */
+export function buildSnapshotComparisonOptions(
+  quotation: SolarQuotationDoc
+): QuotationComparisonOption[] {
+  const snap = quotation.appliedRuleSnapshot || {};
+  const annualGenPerKw = Number(snap.annualGenPerKw || 1400);
+  const panelPricePerKwInr =
+    Number(snap.panelPricePerKwInr || 0) > 0
+      ? Number(snap.panelPricePerKwInr)
+      : Math.round(quotation.equipmentCostInr / Math.max(1, quotation.systemCapacityKw));
+  const bosFlatInr = Number(snap.bosFlatInr ?? 12000);
+  const installationPerKwInr =
+    Number(snap.installationPerKwInr || 0) > 0
+      ? Number(snap.installationPerKwInr)
+      : Math.max(
+          0,
+          Math.round(
+            (quotation.installationChargesInr - bosFlatInr) / Math.max(1, quotation.systemCapacityKw)
+          )
+        );
+  const isResidentialTariff =
+    snap.isResidentialTariff !== undefined
+      ? Boolean(snap.isResidentialTariff)
+      : quotation.applicableSubsidyInr > 0 || quotation.ownershipType === 'TENANT';
+
+  return buildMultiOptionComparison(
+    {
+      systemCapacityKw: quotation.systemCapacityKw,
+      ownershipType: quotation.ownershipType,
+      isResidentialTariff,
+      panelPricePerKwInr,
+      annualGenPerKw,
+      installationPerKwInr,
+      bosAndNetMeteringFlatInr: bosFlatInr,
+      electricityTariffInr: quotation.electricityTariffInr,
+      subsidyRule: {
+        firstTierMaxKw: Number(snap.subsidyFirstTierMaxKw ?? 2),
+        firstTierRateInr: Number(snap.subsidyFirstTierRateInr ?? 30000),
+        secondTierMaxKw: Number(snap.subsidySecondTierMaxKw ?? 3),
+        secondTierRateInr: Number(snap.subsidySecondTierRateInr ?? 18000),
+        maxSubsidyCapInr: Number(snap.subsidyMaxCapInr ?? 78000),
+        residentialOnly:
+          snap.subsidyResidentialOnly !== undefined ? Boolean(snap.subsidyResidentialOnly) : true,
+      },
+    },
+    quotation.systemCapacityKw
+  );
 }
 
 export function downloadQuotationPdf(
@@ -13,59 +70,112 @@ export function downloadQuotationPdf(
 ): void {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
-  // Top Brand Header Bar (Deep Solar Forest Green #14532D)
+  // Top Brand Header Bar (Deep Solar Forest Green #14532D + Slate Blue Accent Strip #0369A1)
   doc.setFillColor(20, 83, 45);
-  doc.rect(0, 0, 210, 34, 'F');
+  doc.rect(0, 0, 210, 32, 'F');
+  doc.setFillColor(3, 105, 161);
+  doc.rect(0, 32, 210, 2, 'F');
 
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
-  doc.text('SuryaSetu Solar EPC Solutions', 14, 15);
+  doc.setFontSize(17);
+  doc.text('SuryaSetu Solar EPC Solutions', 14, 14);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9.5);
-  doc.text('Pratap Nagar Ring Road, Nagpur, Maharashtra 440022 | Vidarbha Rooftop Division', 14, 22);
-  doc.text('GSTIN: 27AABCS4401R1Z5 (Sample) | Helpline: +91-712-2248900 | proposals@suryasetu.in', 14, 27.5);
+  doc.setFontSize(9);
+  doc.text('Pratap Nagar Ring Road, Nagpur, Maharashtra 440022 | Vidarbha Rooftop Solar Division', 14, 20.5);
+  doc.text('GSTIN: 27AABCS4401R1Z5 (Sample) | Helpline: +91-712-2248900 | proposals@suryasetu.in', 14, 26);
 
-  // Quotation Meta Box
+  // Quotation Header & Validity Meta
   doc.setTextColor(15, 23, 42);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.text(`SOLAR PROPOSAL: ${quotation.quotationNumber}`, 14, 45);
+  doc.setFontSize(12.5);
+  doc.text(`COMMERCIAL SOLAR QUOTATION: ${quotation.quotationNumber}`, 14, 42);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9.5);
+  doc.setFontSize(9);
   doc.setTextColor(71, 85, 105);
-  doc.text(`Quotation Date: ${quotation.quotationDate}`, 14, 51.5);
-  doc.text(`Valid Until: ${quotation.validUntilDate}`, 78, 51.5);
-  doc.text(`Status: ${quotation.status}`, 142, 51.5);
+  doc.text(`Issue Date: ${quotation.quotationDate}`, 14, 48);
+  doc.text(`Valid Until: ${quotation.validUntilDate}`, 74, 48);
+  doc.text(`Approval Status: ${quotation.status}`, 136, 48);
 
-  // Customer & System Specification Summary Table
+  // 1. Customer & Selected Solar Plant Specification Summary
   autoTable(doc, {
-    startY: 57,
+    startY: 52,
     theme: 'grid',
     headStyles: {
       fillColor: [241, 245, 249],
       textColor: [15, 23, 42],
       fontStyle: 'bold',
-      fontSize: 9.5,
+      fontSize: 9,
     },
     bodyStyles: {
-      fontSize: 9,
+      fontSize: 8.5,
       textColor: [30, 41, 59],
     },
-    head: [['Customer Information', 'Solar Plant Specifications']],
+    head: [['Customer & Site Information', 'Selected Solar Plant Specifications']],
     body: [
       [
-        `Customer Name: ${quotation.customerName}\nLead Reference: ${leadNumber || quotation.leadId}\nLocation: ${quotation.city} - ${quotation.pincode}\nProperty Status: ${quotation.ownershipType}`,
-        `Recommended Capacity: ${quotation.systemCapacityKw} kW Grid-Connected Rooftop\nModule Package: ${quotation.panelTypeLabel}\nEst. Yearly Generation: ${quotation.annualGenerationUnits.toLocaleString('en-IN')} units (kWh/yr)\nApplicable Tariff Used: INR ${quotation.electricityTariffInr.toFixed(2)} / unit`,
+        `Customer Name: ${quotation.customerName}\nLead Reference: ${leadNumber || quotation.leadId}\nLocation: ${quotation.city} - ${quotation.pincode}\nProperty Ownership: ${quotation.ownershipType}`,
+        `Selected Capacity: ${quotation.systemCapacityKw} kW Grid-Connected Rooftop\nModule Package: ${quotation.panelTypeLabel}\nEst. Yearly Generation: ${quotation.annualGenerationUnits.toLocaleString('en-IN')} units (kWh/yr)\nApplicable Tariff Used: INR ${quotation.electricityTariffInr.toFixed(2)} / unit`,
       ],
     ],
   });
 
-  const afterSpecY = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 95;
+  const afterSpecY =
+    (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 84;
 
-  // Hardware & Installation Line Items
+  // 2. Multi-Option Comparison Table (1 kW, 2 kW, 3 kW & Suitable Alternative)
+  const comparisonOptions = buildSnapshotComparisonOptions(quotation);
+  const optionRows = comparisonOptions.map((opt) => [
+    `${opt.optionLabel}${opt.isSelected ? ' [SELECTED]' : ''}`,
+    `${opt.annualGenerationUnits.toLocaleString('en-IN')} kWh`,
+    formatInr(opt.totalInstallationCostInr),
+    opt.applicableSubsidyInr > 0 ? `- ${formatInr(opt.applicableSubsidyInr)}` : 'INR 0',
+    formatInr(opt.netCustomerCostInr),
+    `${formatInr(opt.estimatedAnnualSavingsInr)}/yr`,
+    `${opt.estimatedPaybackYears} yrs`,
+  ]);
+
+  autoTable(doc, {
+    startY: afterSpecY + 5,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [3, 105, 161],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 8.5,
+    },
+    bodyStyles: {
+      fontSize: 8,
+      textColor: [15, 23, 42],
+    },
+    columnStyles: {
+      1: { halign: 'right' },
+      2: { halign: 'right' },
+      3: { halign: 'right' },
+      4: { halign: 'right', fontStyle: 'bold' },
+      5: { halign: 'right' },
+      6: { halign: 'right' },
+    },
+    head: [
+      [
+        'Solar Option (1 / 2 / 3 kW / Alt)',
+        'Yearly Gen',
+        'Gross Price',
+        'Subsidy*',
+        'Net Cost',
+        'Est. Savings',
+        'Payback',
+      ],
+    ],
+    body: optionRows,
+  });
+
+  const afterCompY =
+    (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 128;
+
+  // 3. Hardware & Installation Line Items for Selected Option
   const itemRows =
     lineItems.length > 0
       ? lineItems.map((item, idx) => [
@@ -96,53 +206,57 @@ export function downloadQuotationPdf(
         ];
 
   autoTable(doc, {
-    startY: afterSpecY + 6,
+    startY: afterCompY + 5,
     theme: 'striped',
     headStyles: {
       fillColor: [20, 83, 45],
       textColor: [255, 255, 255],
-      fontSize: 9,
+      fontSize: 8.5,
     },
     bodyStyles: {
-      fontSize: 8.5,
+      fontSize: 8,
       textColor: [30, 41, 59],
     },
     columnStyles: {
-      0: { cellWidth: 10 },
+      0: { cellWidth: 8 },
       4: { halign: 'right' },
       5: { halign: 'right' },
     },
-    head: [['#', 'Component', 'Technical Specification', 'Qty', 'Unit Price', 'Amount']],
+    head: [['#', 'Selected Option Component', 'Technical Specification', 'Qty', 'Unit Price', 'Amount']],
     body: itemRows,
   });
 
-  const afterItemsY = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 145;
+  const afterItemsY =
+    (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 172;
 
-  // Financial, Subsidy & ROI Breakdown Table
+  // 4. Deterministic Financial, Subsidy & Payback Summary
   const subsidyNote =
     quotation.applicableSubsidyInr > 0
-      ? `Sample Configurable Rule (${quotation.appliedRuleSnapshot.subsidyRuleTitle || 'Residential Slab'}): INR 30,000/kW up to 2 kW + INR 18,000 for 3rd kW (Max INR 78,000)`
+      ? `Configurable Rule (${quotation.appliedRuleSnapshot.subsidyRuleTitle || 'Residential Slab'}): INR ${Number(quotation.appliedRuleSnapshot.subsidyFirstTierRateInr ?? 30000).toLocaleString('en-IN')}/kW first ${quotation.appliedRuleSnapshot.subsidyFirstTierMaxKw ?? 2} kW + INR ${Number(quotation.appliedRuleSnapshot.subsidySecondTierRateInr ?? 18000).toLocaleString('en-IN')} next slab (Cap INR ${Number(quotation.appliedRuleSnapshot.subsidyMaxCapInr ?? 78000).toLocaleString('en-IN')})`
       : 'INR 0 (Subsidy applicable only to eligible residential homeowner connections)';
 
   autoTable(doc, {
-    startY: afterItemsY + 6,
+    startY: afterItemsY + 5,
     theme: 'grid',
     headStyles: {
       fillColor: [240, 253, 244],
       textColor: [20, 83, 45],
       fontStyle: 'bold',
-      fontSize: 9.5,
+      fontSize: 8.5,
     },
     bodyStyles: {
-      fontSize: 9,
+      fontSize: 8.2,
       textColor: [15, 23, 42],
     },
     columnStyles: {
       1: { halign: 'right', fontStyle: 'bold' },
     },
-    head: [['Financial, Subsidy & Payback Summary', 'Deterministic Calculation']],
+    head: [['Selected Option Financial & Payback Summary', 'Deterministic Calculation']],
     body: [
-      ['Total Turnkey Installation Cost (Equipment + BOS + Installation)', formatInr(quotation.totalInstallationCostInr)],
+      [
+        'Gross Turnkey Installation Price (Equipment + BOS + Net Metering)',
+        formatInr(quotation.totalInstallationCostInr),
+      ],
       [`Less: Applicable Government Subsidy*\n${subsidyNote}`, `- ${formatInr(quotation.applicableSubsidyInr)}`],
       ['Final Net Customer Investment (After Subsidy)', formatInr(quotation.netCustomerCostInr)],
       [
@@ -157,35 +271,42 @@ export function downloadQuotationPdf(
     ],
   });
 
-  const afterFinY = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 220;
+  const afterFinY =
+    (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 232;
 
-  // Terms, Conditions & Rule Snapshot Audit Footer
+  // 5. Customer Acceptance, Validity & Regulatory Audit Footer
+  let currY = afterFinY + 6;
+  if (currY > 262) {
+    doc.addPage();
+    currY = 18;
+  }
+
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setTextColor(15, 23, 42);
-  doc.text('Terms, Conditions & Regulatory Disclaimer:', 14, afterFinY + 8);
+  doc.text('Quotation Validity, Customer Approval & Regulatory Terms:', 14, currY);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.8);
+  doc.setFontSize(7.4);
   doc.setTextColor(71, 85, 105);
   const terms = [
-    '1. Subsidy Disclaimer: Subsidy figures use configurable sample rules stored with effective dates. Actual DBT entitlement is subject to current MNRE / PM Surya Ghar portal verification and DISCOM technical feasibility approval.',
-    '2. Warranty: 25-year linear performance warranty on PV modules and 8-year manufacturer warranty on grid-tie string inverter.',
-    '3. Payment Milestones: 20% advance upon quotation approval, 70% prior to solar kit dispatch, 10% upon installation & net-meter testing.',
-    '4. Validity & Rule Snapshot: Pricing is locked until Valid Until date using Rule Snapshot v' +
+    `1. Proposal Validity & Customer Approval: Valid until ${quotation.validUntilDate}. Current Customer Approval Status: ${quotation.status}.`,
+    '2. Subsidy Disclaimer: Subsidy figures are computed deterministically from configurable rules with effective dates. Actual DBT release is subject to MNRE / PM Surya Ghar portal verification and MSEDCL technical feasibility.',
+    '3. Warranty & Milestones: 25-year linear performance warranty on PV modules; 8-year inverter warranty. Payment schedule: 20% booking advance, 70% prior to dispatch, 10% at commissioning.',
+    '4. Locked Historical Rule Snapshot: Rule v' +
       String(quotation.appliedRuleSnapshot.subsidyRuleVersion || 1) +
       ' (' +
       String(quotation.appliedRuleSnapshot.subsidyEffectiveFrom || quotation.quotationDate) +
       ' to ' +
       String(quotation.appliedRuleSnapshot.subsidyEffectiveTo || '2027-12-31') +
-      ').',
+      '). Future pricing updates do not alter this issued proposal.',
   ];
 
-  let currY = afterFinY + 13;
+  currY += 4.5;
   for (const line of terms) {
     const wrapped = doc.splitTextToSize(line, 182);
     doc.text(wrapped, 14, currY);
-    currY += wrapped.length * 3.8 + 1.2;
+    currY += wrapped.length * 3.4 + 1;
   }
 
   doc.save(`${quotation.quotationNumber}_${quotation.customerName.replace(/\s+/g, '_')}.pdf`);

@@ -12,9 +12,11 @@ import {
 import {
   analyzeElectricityBillImage,
   generateTransparentAiExplanation,
+  validateDocumentMagicBytes,
   validateImageMagicBytes,
 } from './src/server/geminiService.ts';
 import {
+  buildMultiOptionComparison,
   calculateSolarQuotation,
   evaluateLeadQualification,
   MAX_BILL_FILE_BYTES,
@@ -30,8 +32,10 @@ dotenv.config();
 const PORT = Number(process.env.PORT) || 3000;
 const WORKSPACE_ROOT = process.cwd();
 const BILL_STORAGE_DIR = path.join(WORKSPACE_ROOT, '.data', 'bills');
+const PROJECT_DOC_STORAGE_DIR = path.join(WORKSPACE_ROOT, '.data', 'project_docs');
 
 fs.mkdirSync(BILL_STORAGE_DIR, { recursive: true });
+fs.mkdirSync(PROJECT_DOC_STORAGE_DIR, { recursive: true });
 
 interface StoredBillMeta {
   storageKey: string;
@@ -41,12 +45,33 @@ interface StoredBillMeta {
   createdAt: string;
 }
 
+interface StoredProjectDocMeta {
+  projectId: string;
+  docId: string;
+  ownerUid: string;
+  assignedStaffUids: string[];
+  uploadedByUid: string;
+  uploadedByName: string;
+  mimeType: 'application/pdf' | 'image/jpeg' | 'image/png' | 'image/webp';
+  fileName: string;
+  fileSizeBytes: number;
+  createdAt: string;
+}
+
 function getMetaPath(storageKey: string): string {
   return path.join(BILL_STORAGE_DIR, `${storageKey}.meta.json`);
 }
 
 function getBinPath(storageKey: string): string {
   return path.join(BILL_STORAGE_DIR, `${storageKey}.bin`);
+}
+
+function getProjectDocMetaPath(projectId: string, docId: string): string {
+  return path.join(PROJECT_DOC_STORAGE_DIR, `${projectId}__${docId}.meta.json`);
+}
+
+function getProjectDocBinPath(projectId: string, docId: string): string {
+  return path.join(PROJECT_DOC_STORAGE_DIR, `${projectId}__${docId}.bin`);
 }
 
 function resolveBillBuffer(storageRef: string): { buffer: Buffer; mimeType: string } {
@@ -113,7 +138,8 @@ async function bootstrapServer() {
 
       if (!validateImageMagicBytes(buffer, mimeType)) {
         res.status(400).json({
-          error: 'Invalid or corrupted image file. Please upload an authentic JPEG, PNG, or WebP bill photo.',
+          error:
+            'Invalid or corrupted image file. Please upload an authentic JPEG, PNG, or WebP bill photo.',
         });
         return;
       }
@@ -180,6 +206,146 @@ async function bootstrapServer() {
       res.status(500).json({ error: 'Failed to retrieve electricity bill.' });
     }
   });
+
+  // 2b. Protected Project Document Upload & RBAC-Restricted Delivery
+  app.post(
+    '/api/projects/:projectId/documents/:docId/file',
+    requireAuth,
+    (req: AuthenticatedRequest, res) => {
+      try {
+        const projectId = String(req.params.projectId || '');
+        const docId = String(req.params.docId || '');
+        if (!/^[a-zA-Z0-9_-]{4,120}$/.test(projectId) || !/^[a-zA-Z0-9_-]{4,120}$/.test(docId)) {
+          res.status(400).json({ error: 'Invalid project or document identifier.' });
+          return;
+        }
+
+        const {
+          fileName,
+          mimeType,
+          base64Data,
+          ownerUid,
+          assignedStaffUids,
+          uploadedByName,
+        } = req.body as {
+          fileName?: string;
+          mimeType?: string;
+          base64Data?: string;
+          ownerUid?: string;
+          assignedStaffUids?: string[];
+          uploadedByName?: string;
+        };
+
+        const staffList = Array.isArray(assignedStaffUids) ? assignedStaffUids.slice(0, 10) : [];
+        const access = verifyResourceAccess(req, {
+          assignedStaffUids: staffList,
+          requesterRole:
+            req.headers['x-workspace-role'] === 'SALES_STAFF' ? 'SALES_STAFF' : undefined,
+          requireStaff: true,
+        });
+        if (!access.allowed) {
+          res.status(403).json({ error: access.reason || 'Staff authorization required to upload project documents.' });
+          return;
+        }
+
+        if (!fileName || !mimeType || !base64Data || !ownerUid) {
+          res.status(400).json({ error: 'File name, MIME type, owner UID, and file payload are required.' });
+          return;
+        }
+
+        const allowedDocMimes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+        if (!allowedDocMimes.includes(mimeType)) {
+          res.status(400).json({ error: 'Unsupported document type. Upload PDF, JPEG, PNG, or WebP.' });
+          return;
+        }
+
+        const cleanBase64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
+        const buffer = Buffer.from(cleanBase64, 'base64');
+        if (buffer.length === 0 || buffer.length > MAX_BILL_FILE_BYTES) {
+          res.status(400).json({ error: 'Project document file must be between 1 KB and 5 MB.' });
+          return;
+        }
+
+        if (!validateDocumentMagicBytes(buffer, mimeType)) {
+          res.status(400).json({
+            error: 'Invalid or corrupted document binary. Upload an authentic PDF, JPEG, PNG, or WebP.',
+          });
+          return;
+        }
+
+        const meta: StoredProjectDocMeta = {
+          projectId,
+          docId,
+          ownerUid: String(ownerUid).slice(0, 128),
+          assignedStaffUids: staffList,
+          uploadedByUid: req.user!.uid,
+          uploadedByName: String(uploadedByName || req.user!.email || 'EPC Engineer').slice(0, 100),
+          mimeType: mimeType as StoredProjectDocMeta['mimeType'],
+          fileName: String(fileName).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 140),
+          fileSizeBytes: buffer.length,
+          createdAt: new Date().toISOString(),
+        };
+
+        fs.writeFileSync(getProjectDocBinPath(projectId, docId), buffer);
+        fs.writeFileSync(getProjectDocMetaPath(projectId, docId), JSON.stringify(meta, null, 2));
+
+        res.json({
+          stored: true,
+          fileSizeKb: Math.max(1, Math.round(buffer.length / 1024)),
+          fileName: meta.fileName,
+          createdAt: meta.createdAt,
+        });
+      } catch (error) {
+        console.error('Protected project document upload failed:', error);
+        res.status(500).json({ error: 'Unable to store project document securely.' });
+      }
+    }
+  );
+
+  app.get(
+    '/api/projects/:projectId/documents/:docId/file',
+    requireAuth,
+    (req: AuthenticatedRequest, res) => {
+      try {
+        const projectId = String(req.params.projectId || '');
+        const docId = String(req.params.docId || '');
+        if (!/^[a-zA-Z0-9_-]{4,120}$/.test(projectId) || !/^[a-zA-Z0-9_-]{4,120}$/.test(docId)) {
+          res.status(400).json({ error: 'Invalid project or document identifier.' });
+          return;
+        }
+        const metaPath = getProjectDocMetaPath(projectId, docId);
+        if (!fs.existsSync(metaPath)) {
+          res.status(404).json({ error: 'Uploaded binary file not found for this document record.' });
+          return;
+        }
+
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as StoredProjectDocMeta;
+        const access = verifyResourceAccess(req, {
+          resourceOwnerUid: meta.ownerUid,
+          assignedStaffUids: meta.assignedStaffUids,
+          requesterRole:
+            req.headers['x-workspace-role'] === 'SALES_STAFF' ? 'SALES_STAFF' : undefined,
+        });
+
+        if (!access.allowed) {
+          res.status(403).json({ error: access.reason || 'Access denied to protected project document.' });
+          return;
+        }
+
+        const bin = fs.readFileSync(getProjectDocBinPath(projectId, docId));
+        res.setHeader('Content-Type', meta.mimeType);
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="${meta.fileName.replace(/"/g, '')}"`
+        );
+        res.setHeader('Cache-Control', 'private, no-store');
+        res.send(bin);
+      } catch (error) {
+        console.error('Protected project document read failed:', error);
+        res.status(500).json({ error: 'Unable to download protected project document.' });
+      }
+    }
+  );
 
   // 3. Gemini Vision Electricity Bill Analysis (Server-side @google/genai)
   app.post('/api/ai/extract-bill', requireAuth, async (req: AuthenticatedRequest, res) => {
@@ -262,6 +428,7 @@ async function bootstrapServer() {
             sanctionedLoadKw: Number(sanctionedLoadKw ?? 0),
             pincode: String(pincode ?? ''),
             monthlyUnitsKwh: Number(monthlyUnitsKwh ?? 0),
+            roofType,
           },
           deterministic
         );
@@ -294,12 +461,13 @@ async function bootstrapServer() {
     res.json(result);
   });
 
-  // 6. Deterministic Backend Quotation & Subsidy Calculator with Effective-Date Rule Selection
+  // 6. Deterministic Backend Quotation & Multi-Option Comparison Calculator
   app.post('/api/quotations/calculate', requireAuth, (req: AuthenticatedRequest, res) => {
     try {
       const {
         quotationDate,
         systemCapacityKw,
+        recommendedCapacityKw,
         ownershipType,
         isResidentialTariff,
         selectedPanelCode,
@@ -310,6 +478,7 @@ async function bootstrapServer() {
       } = req.body as {
         quotationDate: string;
         systemCapacityKw: number;
+        recommendedCapacityKw?: number;
         ownershipType: 'OWNER' | 'TENANT';
         isResidentialTariff: boolean;
         selectedPanelCode?: string;
@@ -334,16 +503,20 @@ async function bootstrapServer() {
       const pricingRule = selectEffectiveRule(pricingRules, quotationDate);
       const tariffRule = selectEffectiveRule(tariffRules, quotationDate, selectedTariffCode);
 
+      const configuredAnnualGen =
+        Number(pricingRule.parameters.annualGenPerKw || 0) > 0
+          ? Number(pricingRule.parameters.annualGenPerKw)
+          : Number(panelRule.parameters.annualGenPerKw || 1400);
+
+      const baseBosFlatInr = Number(pricingRule.parameters.bosFlatInr ?? 12000);
       const calcInput: QuotationCalculationInput = {
         systemCapacityKw: Number(systemCapacityKw),
         ownershipType,
         isResidentialTariff: Boolean(isResidentialTariff),
         panelPricePerKwInr: Number(panelRule.parameters.pricePerKwInr ?? 42000),
-        annualGenPerKw: Number(panelRule.parameters.annualGenPerKw ?? 1400),
+        annualGenPerKw: configuredAnnualGen,
         installationPerKwInr: Number(pricingRule.parameters.installationPerKwInr ?? 11000),
-        bosAndNetMeteringFlatInr:
-          Number(pricingRule.parameters.bosFlatInr ?? 12000) +
-          Number(customInstallationAdjustmentInr ?? 0),
+        bosAndNetMeteringFlatInr: baseBosFlatInr + Number(customInstallationAdjustmentInr ?? 0),
         customEquipmentAdjustmentInr: Number(customEquipmentAdjustmentInr ?? 0),
         electricityTariffInr: Number(tariffRule.parameters.tariffPerUnitInr ?? 8.5),
         selfConsumptionRatio: Number(pricingRule.parameters.selfConsumptionRatio ?? 1.0),
@@ -358,7 +531,9 @@ async function bootstrapServer() {
       };
 
       const calculation = calculateSolarQuotation(calcInput);
+      const comparisonOptions = buildMultiOptionComparison(calcInput, recommendedCapacityKw);
 
+      // 23 keys strictly <= 25 key limit in firestore.rules
       const appliedRuleSnapshot: Record<string, string | number | boolean> = {
         quotationDate,
         panelRuleCode: panelRule.code,
@@ -371,19 +546,25 @@ async function bootstrapServer() {
         subsidyRuleVersion: subsidyRuleDoc.versionNumber,
         subsidyEffectiveFrom: subsidyRuleDoc.effectiveFrom,
         subsidyEffectiveTo: subsidyRuleDoc.effectiveTo,
+        subsidyFirstTierMaxKw: calcInput.subsidyRule.firstTierMaxKw,
         subsidyFirstTierRateInr: calcInput.subsidyRule.firstTierRateInr,
+        subsidySecondTierMaxKw: calcInput.subsidyRule.secondTierMaxKw,
         subsidySecondTierRateInr: calcInput.subsidyRule.secondTierRateInr,
         subsidyMaxCapInr: calcInput.subsidyRule.maxSubsidyCapInr,
+        subsidyResidentialOnly: calcInput.subsidyRule.residentialOnly,
         pricingRuleCode: pricingRule.code,
         pricingRuleVersion: pricingRule.versionNumber,
         installationPerKwInr: calcInput.installationPerKwInr,
+        bosFlatInr: calcInput.bosAndNetMeteringFlatInr,
         tariffRuleCode: tariffRule.code,
         tariffRuleVersion: tariffRule.versionNumber,
         tariffPerUnitInr: calcInput.electricityTariffInr,
+        isResidentialTariff: calcInput.isResidentialTariff,
       };
 
       res.json({
         calculation,
+        comparisonOptions,
         appliedRuleSnapshot,
         panelTitle: panelRule.title,
       });

@@ -32,21 +32,21 @@ export class ErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-          <div className="max-w-lg w-full bg-white border border-slate-200 rounded-xl p-8">
-            <div className="flex items-center gap-3 text-red-700 mb-3">
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6">
+          <div className="max-w-lg w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8">
+            <div className="flex items-center gap-3 text-red-700 dark:text-red-400 mb-3">
               <AlertTriangle className="w-5 h-5 shrink-0" />
-              <h1 className="text-lg font-semibold text-slate-900">
+              <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
                 Application Encountered an Unexpected Error
               </h1>
             </div>
-            <p className="text-sm text-slate-600 leading-relaxed mb-6 break-words">
+            <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed mb-6 break-words">
               {this.state.errorMessage || 'An unexpected condition interrupted this view.'}
             </p>
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-emerald-900 rounded-lg hover:bg-emerald-950 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-emerald-900 dark:bg-emerald-700 rounded-lg hover:bg-emerald-950 dark:hover:bg-emerald-600 transition-colors cursor-pointer"
             >
               <RefreshCw className="w-4 h-4" />
               Reload Application

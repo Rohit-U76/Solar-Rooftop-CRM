@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildMultiOptionComparison,
   calculateApplicableSubsidy,
   calculateSolarQuotation,
+  checkAdminAccess,
   checkBackendAccess,
+  classifyBillExtractionClarity,
   evaluateLeadQualification,
   evaluateProjectDelay,
+  maskConsumerNumber,
+  maskMobileNumber,
   MAX_BILL_FILE_BYTES,
   selectEffectiveRule,
   validateExtractionConfirmation,
@@ -12,6 +17,10 @@ import {
   validateProjectStageTransition,
   type SubsidyRuleParams,
 } from '../shared/solarEngine.ts';
+import {
+  validateDocumentMagicBytes,
+  validateImageMagicBytes,
+} from '../server/geminiService.ts';
 
 const SAMPLE_SUBSIDY_RULE: SubsidyRuleParams = {
   firstTierMaxKw: 2,
@@ -69,8 +78,8 @@ describe('SuryaSetu Deterministic Solar Engine & Business Rules', () => {
     });
   });
 
-  // 2. Electricity Bill Extraction Confirmation Validation
-  describe('2. Bill Extraction Verification Completeness', () => {
+  // 2. Electricity Bill Extraction Confirmation Validation & Blurry Image Detection
+  describe('2. Bill Extraction Verification & Blurry/Unreadable Image Detection', () => {
     it('never silently accepts missing or zeroed extracted bill fields', () => {
       const incomplete = validateExtractionConfirmation({
         consumerNumber: '',
@@ -101,11 +110,49 @@ describe('SuryaSetu Deterministic Solar Engine & Business Rules', () => {
       });
       expect(ok.valid).toBe(true);
     });
+
+    it('detects blurry or unreadable electricity bills and requests re-upload', () => {
+      const blurry = classifyBillExtractionClarity({
+        confidenceScore: 22,
+        monthlyUnitsKwh: 0,
+        billingAmountInr: 0,
+        reportedClarity: 'UNCLEAR_REUPLOAD',
+      });
+      expect(blurry.clarityStatus).toBe('UNCLEAR_REUPLOAD');
+      expect(blurry.requiresReupload).toBe(true);
+
+      const zeroFields = classifyBillExtractionClarity({
+        confidenceScore: 60,
+        monthlyUnitsKwh: 0,
+        billingAmountInr: 0,
+        reportedClarity: 'CLEAR',
+      });
+      expect(zeroFields.clarityStatus).toBe('UNCLEAR_REUPLOAD');
+      expect(zeroFields.requiresReupload).toBe(true);
+
+      const moderate = classifyBillExtractionClarity({
+        confidenceScore: 62,
+        monthlyUnitsKwh: 290,
+        billingAmountInr: 2800,
+        reportedClarity: 'LOW_CONFIDENCE',
+      });
+      expect(moderate.clarityStatus).toBe('LOW_CONFIDENCE');
+      expect(moderate.requiresReupload).toBe(false);
+
+      const clear = classifyBillExtractionClarity({
+        confidenceScore: 93,
+        monthlyUnitsKwh: 340,
+        billingAmountInr: 3200,
+        reportedClarity: 'CLEAR',
+      });
+      expect(clear.clarityStatus).toBe('CLEAR');
+      expect(clear.requiresReupload).toBe(false);
+    });
   });
 
-  // 3 & 4. Lead Scoring & Solar Capacity Recommendation (Exact Sample Cohort)
-  describe('3 & 4. Lead Qualification & Solar Sizing (LD-30881, LD-30902, LD-30915)', () => {
-    it('scores LD-30881 (Prashant Wankhede, Owner, ₹3,200, 340 units) as HIGH with 3 kW recommended', () => {
+  // 3 & 4. Lead Scoring & Solar Capacity Recommendation (Exact Sample Cohort + Roof Type)
+  describe('3 & 4. Lead Qualification & Solar Sizing (LD-30881, LD-30902, LD-30915 + Roof Type)', () => {
+    it('scores LD-30881 (Prashant Wankhede, Owner, RCC, ₹3,200, 340 units) as HIGH with 3 kW recommended', () => {
       const out = evaluateLeadQualification({
         ownershipType: 'OWNER',
         avgMonthlyBillInr: 3200,
@@ -122,7 +169,7 @@ describe('SuryaSetu Deterministic Solar Engine & Business Rules', () => {
       expect(out.suggestedSurveyStatus).toBe('SURVEY_SCHEDULED');
     });
 
-    it('scores LD-30902 (Rohit Meshram, Tenant, ₹1,900, 210 units) as LOW & "Not yet recommended" without rejecting', () => {
+    it('scores LD-30902 (Rohit Meshram, Tenant, ₹1,900, 210 units) as LOW & "Not yet recommended" with phone call instead of rejection', () => {
       const out = evaluateLeadQualification({
         ownershipType: 'TENANT',
         avgMonthlyBillInr: 1900,
@@ -139,7 +186,7 @@ describe('SuryaSetu Deterministic Solar Engine & Business Rules', () => {
       expect(out.nextRecommendedAction.toLowerCase()).toContain('call');
     });
 
-    it('scores LD-30915 (Ayesha Siddiqui, Owner, ₹650, 85 units) as LOW with 1 kW starter recommendation & call', () => {
+    it('scores LD-30915 (Ayesha Siddiqui, Owner, ₹650, 85 units) as LOW with 1 kW starter recommendation & phone qualification call', () => {
       const out = evaluateLeadQualification({
         ownershipType: 'OWNER',
         avgMonthlyBillInr: 650,
@@ -153,6 +200,42 @@ describe('SuryaSetu Deterministic Solar Engine & Business Rules', () => {
       expect(out.recommendedCapacityKw).toBe(1);
       expect(out.recommendationLabel).toBe('1 kW');
       expect(out.suggestedSurveyStatus).toBe('CALL_SCHEDULED');
+      expect(out.nextRecommendedAction.toLowerCase()).toContain('call');
+    });
+
+    it('evaluates roofType (RCC vs METAL_SHEET vs TILED) in roofAreaPoints and mounting notes', () => {
+      const rcc = evaluateLeadQualification({
+        ownershipType: 'OWNER',
+        avgMonthlyBillInr: 2600,
+        rooftopAreaSqFt: 320,
+        sanctionedLoadKw: 3,
+        pincode: '440015',
+        monthlyUnitsKwh: 280,
+        roofType: 'RCC',
+      });
+      const metal = evaluateLeadQualification({
+        ownershipType: 'OWNER',
+        avgMonthlyBillInr: 2600,
+        rooftopAreaSqFt: 320,
+        sanctionedLoadKw: 3,
+        pincode: '440015',
+        monthlyUnitsKwh: 280,
+        roofType: 'METAL_SHEET',
+      });
+      const tiled = evaluateLeadQualification({
+        ownershipType: 'OWNER',
+        avgMonthlyBillInr: 2600,
+        rooftopAreaSqFt: 320,
+        sanctionedLoadKw: 3,
+        pincode: '440015',
+        monthlyUnitsKwh: 280,
+        roofType: 'TILED',
+      });
+
+      expect(rcc.roofAreaPoints).toBeGreaterThan(metal.roofAreaPoints);
+      expect(metal.roofAreaPoints).toBeGreaterThan(tiled.roofAreaPoints);
+      expect(rcc.roofAreaPoints).toBeLessThanOrEqual(25);
+      expect(tiled.recommendationReason.toLowerCase()).toContain('tiled');
     });
 
     it('caps recommended solar capacity when shadow-free roof area is limited', () => {
@@ -177,9 +260,13 @@ describe('SuryaSetu Deterministic Solar Engine & Business Rules', () => {
       expect(calculateApplicableSubsidy(5, 'OWNER', true, SAMPLE_SUBSIDY_RULE)).toBe(78000);
     });
 
-    it('returns ₹0 subsidy for tenants or non-residential commercial connections', () => {
+    it('returns ₹0 subsidy for tenants or non-residential commercial connections when residentialOnly is true', () => {
       expect(calculateApplicableSubsidy(3, 'TENANT', true, SAMPLE_SUBSIDY_RULE)).toBe(0);
       expect(calculateApplicableSubsidy(3, 'OWNER', false, SAMPLE_SUBSIDY_RULE)).toBe(0);
+
+      // When admin configures residentialOnly = false, commercial property owners qualify
+      const broaderRule: SubsidyRuleParams = { ...SAMPLE_SUBSIDY_RULE, residentialOnly: false };
+      expect(calculateApplicableSubsidy(3, 'OWNER', false, broaderRule)).toBe(78000);
     });
   });
 
@@ -221,10 +308,10 @@ describe('SuryaSetu Deterministic Solar Engine & Business Rules', () => {
     });
   });
 
-  // 7, 8 & 9. Annual Generation, Net Cost, Payback & Snapshot Immutability
-  describe('7, 8 & 9. Deterministic Quotation Math & Snapshot Immutability', () => {
-    it('computes Yearly Generation = Capacity × 1,400, Net Cost, Annual Savings, and Payback accurately', () => {
-      const q = calculateSolarQuotation({
+  // 7, 8 & 9. Annual Generation, Multi-Option Matrix, Net Cost, Payback & Snapshot Immutability
+  describe('7, 8 & 9. Deterministic Quotation Math, Multi-Option Comparison & Snapshot Immutability', () => {
+    it('computes Yearly Generation = Capacity × 1,400 (or admin-configured units/kW), Net Cost, Annual Savings, and Payback accurately', () => {
+      const qDefault = calculateSolarQuotation({
         systemCapacityKw: 3,
         ownershipType: 'OWNER',
         isResidentialTariff: true,
@@ -236,12 +323,51 @@ describe('SuryaSetu Deterministic Solar Engine & Business Rules', () => {
         subsidyRule: SAMPLE_SUBSIDY_RULE, // 78,000
       });
 
-      expect(q.annualGenerationUnits).toBe(4200); // 3 * 1400
-      expect(q.totalInstallationCostInr).toBe(178000);
-      expect(q.applicableSubsidyInr).toBe(78000);
-      expect(q.netCustomerCostInr).toBe(100000); // 178000 - 78000
-      expect(q.estimatedAnnualSavingsInr).toBe(39900); // 4200 * 9.5
-      expect(q.estimatedPaybackYears).toBe(2.5); // 100000 / 39900 = 2.506 -> 2.5
+      expect(qDefault.annualGenerationUnits).toBe(4200); // 3 * 1400
+      expect(qDefault.totalInstallationCostInr).toBe(178000);
+      expect(qDefault.applicableSubsidyInr).toBe(78000);
+      expect(qDefault.netCustomerCostInr).toBe(100000); // 178000 - 78000
+      expect(qDefault.estimatedAnnualSavingsInr).toBe(39900); // 4200 * 9.5
+      expect(qDefault.estimatedPaybackYears).toBe(2.5); // 100000 / 39900 = 2.506 -> 2.5
+
+      // Administrator configures high-efficiency bifacial benchmark (1,500 units/kW/year)
+      const qAdminConfigured = calculateSolarQuotation({
+        systemCapacityKw: 3,
+        ownershipType: 'OWNER',
+        isResidentialTariff: true,
+        panelPricePerKwInr: 45000,
+        annualGenPerKw: 1500,
+        installationPerKwInr: 10000,
+        bosAndNetMeteringFlatInr: 13000,
+        electricityTariffInr: 9.5,
+        subsidyRule: SAMPLE_SUBSIDY_RULE,
+      });
+      expect(qAdminConfigured.annualGenerationUnits).toBe(4500);
+      expect(qAdminConfigured.estimatedAnnualSavingsInr).toBe(42750);
+    });
+
+    it('builds 1 kW, 2 kW, 3 kW, and Suitable Alternative comparison options deterministically', () => {
+      const options = buildMultiOptionComparison(
+        {
+          systemCapacityKw: 3,
+          ownershipType: 'OWNER',
+          isResidentialTariff: true,
+          panelPricePerKwInr: 50000,
+          annualGenPerKw: 1400,
+          installationPerKwInr: 8000,
+          bosAndNetMeteringFlatInr: 12000,
+          electricityTariffInr: 9.0,
+          subsidyRule: SAMPLE_SUBSIDY_RULE,
+        },
+        3
+      );
+
+      expect(options).toHaveLength(4);
+      expect(options.map((o) => o.systemCapacityKw)).toEqual([1, 2, 3, 5]);
+      expect(options.map((o) => o.annualGenerationUnits)).toEqual([1400, 2800, 4200, 7000]);
+      expect(options.map((o) => o.applicableSubsidyInr)).toEqual([30000, 60000, 78000, 78000]);
+      expect(options[2].isRecommended).toBe(true);
+      expect(options[2].isSelected).toBe(true);
     });
 
     it('preserves historical quotation snapshot values when future admin rule versions change', () => {
@@ -263,7 +389,6 @@ describe('SuryaSetu Deterministic Solar Engine & Business Rules', () => {
         applicableSubsidyInr: initialQuote.applicableSubsidyInr,
       });
 
-      // Admin publishes a modified future rule
       const futureSubsidyRule: SubsidyRuleParams = {
         ...SAMPLE_SUBSIDY_RULE,
         maxSubsidyCapInr: 50000,
@@ -288,14 +413,28 @@ describe('SuryaSetu Deterministic Solar Engine & Business Rules', () => {
 
   // 10. Project Status Transitions & Delay SLA Detection
   describe('10. 10-Stage Project Lifecycle Transitions & SLA Delay Check', () => {
-    it('allows sequential forward transitions and blocks stage skipping for standard staff', () => {
-      const okStep = validateProjectStageTransition(
+    it('allows sequential forward transitions across Advance Payment, Installation, DISCOM & Subsidy Credited', () => {
+      const step2 = validateProjectStageTransition(
         'QUOTATION_APPROVED',
         'ADVANCE_PAYMENT_RECEIVED',
         false
       );
-      expect(okStep.valid).toBe(true);
-      expect(okStep.nextIndex).toBe(2);
+      expect(step2.valid).toBe(true);
+      expect(step2.nextIndex).toBe(2);
+
+      const discomStep = validateProjectStageTransition(
+        'INSTALLATION_COMPLETED',
+        'NET_METERING_DISCOM',
+        false
+      );
+      expect(discomStep.valid).toBe(true);
+
+      const subsidyStep = validateProjectStageTransition(
+        'SUBSIDY_SUBMITTED',
+        'SUBSIDY_CREDITED',
+        false
+      );
+      expect(subsidyStep.valid).toBe(true);
 
       const skipped = validateProjectStageTransition(
         'QUOTATION_APPROVED',
@@ -323,9 +462,9 @@ describe('SuryaSetu Deterministic Solar Engine & Business Rules', () => {
     });
   });
 
-  // 11. Role-Based Access Control
-  describe('11. Backend Role-Based Access Control (RBAC)', () => {
-    it('denies unauthenticated or unverified requests and restricts staff-only endpoints', () => {
+  // 11. Role-Based Access Control, PII Masking & File Signature Security
+  describe('11. Backend RBAC, Admin Governance, PII Masking & Magic-Byte Validation', () => {
+    it('denies unauthenticated or unverified requests and restricts staff-only & admin-only endpoints', () => {
       expect(checkBackendAccess({ requesterUid: '' }).allowed).toBe(false);
       expect(
         checkBackendAccess({
@@ -354,9 +493,26 @@ describe('SuryaSetu Deterministic Solar Engine & Business Rules', () => {
           resourceOwnerUid: 'homeowner_2',
         }).allowed
       ).toBe(false);
+
+      // Standard Sales Staff cannot invoke Admin-only pricing/subsidy rule governance
+      expect(
+        checkAdminAccess({
+          requesterUid: 'staff_1',
+          emailVerified: true,
+          requesterRole: 'SALES_STAFF',
+        }).allowed
+      ).toBe(false);
+      expect(
+        checkBackendAccess({
+          requesterUid: 'staff_1',
+          emailVerified: true,
+          requesterRole: 'SALES_STAFF',
+          requireAdmin: true,
+        }).allowed
+      ).toBe(false);
     });
 
-    it('grants access to document owner, assigned sales staff, and verified bootstrapped admin', () => {
+    it('grants access to document owner, assigned sales staff, and verified administrator', () => {
       expect(
         checkBackendAccess({
           requesterUid: 'homeowner_1',
@@ -378,14 +534,36 @@ describe('SuryaSetu Deterministic Solar Engine & Business Rules', () => {
       ).toBe(true);
 
       expect(
-        checkBackendAccess({
+        checkAdminAccess({
           requesterUid: 'admin_uid',
           requesterEmail: 'rohitumdale@gmail.com',
           emailVerified: true,
-          resourceOwnerUid: 'someone_else',
-          requireStaff: true,
         }).allowed
       ).toBe(true);
+
+      expect(
+        checkAdminAccess({
+          requesterUid: 'role_admin_uid',
+          emailVerified: true,
+          requesterRole: 'ADMIN',
+        }).allowed
+      ).toBe(true);
+    });
+
+    it('masks consumer numbers and mobile numbers by default and validates binary file signatures', () => {
+      expect(maskConsumerNumber('410018293401')).toBe('••••••••3401');
+      expect(maskMobileNumber('9823011223')).toBe('+91 ••••••1223');
+
+      const validPdf = Buffer.from('%PDF-1.7\n1 0 obj\n<<>>\nendobj');
+      const validPng = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+      ]);
+      const spoofedExe = Buffer.from('MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00');
+
+      expect(validateDocumentMagicBytes(validPdf, 'application/pdf')).toBe(true);
+      expect(validateImageMagicBytes(validPng, 'image/png')).toBe(true);
+      expect(validateDocumentMagicBytes(spoofedExe, 'application/pdf')).toBe(false);
+      expect(validateImageMagicBytes(spoofedExe, 'image/jpeg')).toBe(false);
     });
   });
 });

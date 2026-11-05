@@ -1,5 +1,6 @@
 import type {
   AdminConfigRuleDoc,
+  ClarityStatus,
   OwnershipType,
   ProjectStage,
   QualificationCategory,
@@ -198,6 +199,57 @@ export function validateExtractionConfirmation(payload: ExtractedBillPayload): V
   };
 }
 
+export function classifyBillExtractionClarity(input: {
+  confidenceScore: number;
+  monthlyUnitsKwh: number;
+  billingAmountInr: number;
+  reportedClarity?: ClarityStatus;
+}): { clarityStatus: ClarityStatus; confidenceScore: number; requiresReupload: boolean } {
+  const confidence = Math.max(0, Math.min(100, Math.round(Number(input.confidenceScore ?? 0))));
+  const units = Math.max(0, Number(input.monthlyUnitsKwh ?? 0));
+  const amount = Math.max(0, Number(input.billingAmountInr ?? 0));
+
+  if (
+    input.reportedClarity === 'UNCLEAR_REUPLOAD' ||
+    confidence < 35 ||
+    (units === 0 && amount === 0)
+  ) {
+    return {
+      clarityStatus: 'UNCLEAR_REUPLOAD',
+      confidenceScore: confidence,
+      requiresReupload: true,
+    };
+  }
+
+  if (input.reportedClarity === 'CLEAR' && confidence >= 75 && units > 0 && amount > 0) {
+    return {
+      clarityStatus: 'CLEAR',
+      confidenceScore: confidence,
+      requiresReupload: false,
+    };
+  }
+
+  return {
+    clarityStatus: 'LOW_CONFIDENCE',
+    confidenceScore: confidence,
+    requiresReupload: false,
+  };
+}
+
+export function maskConsumerNumber(consumerNumber: string): string {
+  const clean = (consumerNumber || '').trim();
+  if (!clean) return 'Unverified';
+  if (clean.length <= 4) return clean;
+  const visibleTail = clean.slice(-4);
+  return `${'•'.repeat(Math.min(8, clean.length - 4))}${visibleTail}`;
+}
+
+export function maskMobileNumber(mobileNumber: string): string {
+  const clean = (mobileNumber || '').replace(/\D/g, '');
+  if (clean.length < 4) return 'DPDP Protected';
+  return `+91 ••••••${clean.slice(-4)}`;
+}
+
 // ============================================================================
 // 4. Transparent Deterministic Lead Scoring & Solar Sizing Engine
 // ============================================================================
@@ -229,9 +281,17 @@ export interface LeadScoringOutput {
   suggestedSurveyStatus: 'SURVEY_SCHEDULED' | 'CALL_SCHEDULED' | 'HOLD_TENANT_CONSENT';
 }
 
+const ROOF_TYPE_LABELS: Record<RoofType, string> = {
+  RCC: 'RCC flat terrace',
+  METAL_SHEET: 'GI metal sheet roof',
+  TILED: 'sloped tiled roof',
+  OTHER: 'custom elevated roof structure',
+};
+
 export function evaluateLeadQualification(input: LeadScoringInput): LeadScoringOutput {
   const annualGenPerKw = input.annualGenPerKw && input.annualGenPerKw > 0 ? input.annualGenPerKw : 1400;
   const serviceInfo = resolvePincodeService(input.pincode);
+  const effectiveRoofType: RoofType = input.roofType ?? 'RCC';
 
   // 1. Ownership (max 20)
   const ownershipPoints = input.ownershipType === 'OWNER' ? 20 : 4;
@@ -254,14 +314,21 @@ export function evaluateLeadQualification(input: LeadScoringInput): LeadScoringO
   else if (effectiveUnits >= 200) consumptionPoints = 13;
   else if (effectiveUnits >= 120) consumptionPoints = 7;
 
-  // 4. Available Rooftop Area (max 14; ~100 sq ft per kW)
-  let roofAreaPoints = 2;
-  if (input.rooftopAreaSqFt >= 350) roofAreaPoints = 14;
-  else if (input.rooftopAreaSqFt >= 220) roofAreaPoints = 10;
-  else if (input.rooftopAreaSqFt >= 110) roofAreaPoints = 6;
+  // 4. Available Rooftop Area & Roof Structure Type (max 14; ~100 sq ft per kW)
+  let areaBasePoints = 2;
+  if (input.rooftopAreaSqFt >= 350) areaBasePoints = 12;
+  else if (input.rooftopAreaSqFt >= 220) areaBasePoints = 8;
+  else if (input.rooftopAreaSqFt >= 110) areaBasePoints = 5;
+
+  let roofTypeBonus = 0;
+  if (effectiveRoofType === 'RCC') roofTypeBonus = 2;
+  else if (effectiveRoofType === 'METAL_SHEET') roofTypeBonus = 1;
+
+  const roofAreaPoints = Math.min(14, areaBasePoints + roofTypeBonus);
 
   // 5. Sanctioned Load (max 10)
-  const effectiveLoad = input.sanctionedLoadKw > 0 ? input.sanctionedLoadKw : Math.max(1, Math.round(effectiveUnits / 100));
+  const effectiveLoad =
+    input.sanctionedLoadKw > 0 ? input.sanctionedLoadKw : Math.max(1, Math.round(effectiveUnits / 100));
   let loadPoints = 2;
   if (effectiveLoad >= 3) loadPoints = 10;
   else if (effectiveLoad >= 2) loadPoints = 7;
@@ -275,8 +342,8 @@ export function evaluateLeadQualification(input: LeadScoringInput): LeadScoringO
   const rawSum =
     ownershipPoints + billPoints + consumptionPoints + roofAreaPoints + loadPoints + pincodePoints;
 
-  // Tenant business rule: Tenants are NOT automatically rejected, but receive low-priority physical survey score
-  // and "Not yet recommended" capacity pending landlord NOC & meter title check.
+  // Tenant business rule: Tenants are NEVER automatically rejected; they receive a phone qualification call
+  // for landlord NOC & MSEDCL consumer title verification before physical survey.
   if (input.ownershipType === 'TENANT') {
     const cappedTenantScore = Math.min(38, rawSum);
     return {
@@ -290,14 +357,14 @@ export function evaluateLeadQualification(input: LeadScoringInput): LeadScoringO
       loadPoints,
       pincodePoints,
       consumptionPoints,
-      recommendationReason: `Tenant enquiry in ${serviceInfo.city} with ₹${input.avgMonthlyBillInr.toLocaleString('en-IN')}/mo bill (${effectiveUnits} kWh). Rooftop solar net-metering and residential subsidy require property owner NOC and MSEDCL consumer title verification before sizing confirmation.`,
+      recommendationReason: `Tenant enquiry in ${serviceInfo.city} (${ROOF_TYPE_LABELS[effectiveRoofType]}) with ₹${input.avgMonthlyBillInr.toLocaleString('en-IN')}/mo bill (${effectiveUnits} kWh). Rooftop solar net-metering and residential subsidy require property owner NOC and MSEDCL consumer title verification before sizing confirmation.`,
       nextRecommendedAction:
-        'Offer a 10-minute consultative sales call to verify landlord NOC readiness instead of dispatching an immediate physical site survey.',
+        'Schedule a 10-minute phone qualification call to verify landlord NOC readiness instead of automatic rejection or immediate physical site survey.',
       suggestedSurveyStatus: 'HOLD_TENANT_CONSENT',
     };
   }
 
-  // Outside serviceable Maharashtra zone
+  // Outside serviceable Maharashtra zone: courtesy phone qualification call, never silent rejection
   if (!serviceInfo.serviceable) {
     const outOfZoneScore = Math.min(35, rawSum);
     return {
@@ -311,14 +378,15 @@ export function evaluateLeadQualification(input: LeadScoringInput): LeadScoringO
       loadPoints,
       pincodePoints,
       consumptionPoints,
-      recommendationReason: `Pincode ${input.pincode} is outside SuryaSetu's Vidarbha & Maharashtra installation network.`,
-      nextRecommendedAction: 'Schedule a brief courtesy call to confirm installation address or refer to local EPC partner.',
+      recommendationReason: `Pincode ${input.pincode} is outside SuryaSetu's primary Vidarbha & Maharashtra installation network.`,
+      nextRecommendedAction:
+        'Schedule a brief phone qualification call to confirm installation address or refer to regional EPC partner.',
       suggestedSurveyStatus: 'CALL_SCHEDULED',
     };
   }
 
   // Owner solar capacity calculation:
-  // Yearly consumption = effectiveUnits * 12; Yearly generation per kW = annualGenPerKw (1,400 units)
+  // Yearly consumption = effectiveUnits * 12; Yearly generation per kW = annualGenPerKw (default 1,400 units)
   const rawDemandKw = (effectiveUnits * 12) / annualGenPerKw;
   const maxRoofSupportedKw = Math.max(1, Math.floor(input.rooftopAreaSqFt / 100));
   const recommendedCapacityKw = Math.max(1, Math.min(Math.round(rawDemandKw), maxRoofSupportedKw));
@@ -327,7 +395,7 @@ export function evaluateLeadQualification(input: LeadScoringInput): LeadScoringO
   // Category classification rules
   let category: QualificationCategory = 'LOW';
   if (input.avgMonthlyBillInr < 1000 || effectiveUnits < 110) {
-    // Low electricity bill business rule: offer starter 1 kW guidance + short call, keep priority LOW
+    // Low electricity bill business rule: offer starter 1 kW guidance + phone qualification call, keep priority LOW
     category = 'LOW';
   } else if (rawSum >= 75) {
     category = 'HIGH';
@@ -338,26 +406,33 @@ export function evaluateLeadQualification(input: LeadScoringInput): LeadScoringO
   }
 
   let nextRecommendedAction =
-    'Schedule a short consultative sales call to review payback expectations before booking a site survey.';
+    'Schedule a phone qualification call to review tariff eligibility, roof mounting, and payback expectations before dispatching a site survey.';
   let suggestedSurveyStatus: 'SURVEY_SCHEDULED' | 'CALL_SCHEDULED' = 'CALL_SCHEDULED';
 
   if (category === 'HIGH') {
-    nextRecommendedAction = `Assign Nagpur field engineer for priority rooftop site survey and shadow check for ${recommendedCapacityKw} kW plant.`;
+    nextRecommendedAction = `Assign Nagpur field engineer for priority rooftop site survey and shadow check for ${recommendedCapacityKw} kW plant on ${ROOF_TYPE_LABELS[effectiveRoofType]}.`;
     suggestedSurveyStatus = 'SURVEY_SCHEDULED';
   } else if (category === 'MEDIUM') {
-    nextRecommendedAction = `Conduct quick qualification call to confirm sanctioned load (${effectiveLoad} kW) and book rooftop survey.`;
+    nextRecommendedAction = `Conduct phone qualification call to confirm sanctioned load (${effectiveLoad} kW), ${ROOF_TYPE_LABELS[effectiveRoofType]} access, and book rooftop survey.`;
     suggestedSurveyStatus = 'CALL_SCHEDULED';
   }
 
   const roofLimitedNote =
     Math.round(rawDemandKw) > maxRoofSupportedKw
-      ? ` Capacity constrained to ${maxRoofSupportedKw} kW by ${input.rooftopAreaSqFt} sq ft available roof area.`
+      ? ` Capacity constrained to ${maxRoofSupportedKw} kW by ${input.rooftopAreaSqFt} sq ft available area.`
       : '';
+
+  const roofMountingNote =
+    effectiveRoofType === 'TILED' || effectiveRoofType === 'OTHER'
+      ? ` Mounting on ${ROOF_TYPE_LABELS[effectiveRoofType]} requires elevated rafter/fabrication assessment.`
+      : effectiveRoofType === 'METAL_SHEET'
+        ? ` Suitable for rail-clamp mounting on ${ROOF_TYPE_LABELS[effectiveRoofType]}.`
+        : '';
 
   const lowBillNote =
     input.avgMonthlyBillInr < 1000 || effectiveUnits < 110
-      ? ` Monthly usage (${effectiveUnits} kWh, ₹${input.avgMonthlyBillInr}) is modest, so a compact ${recommendedCapacityKw} kW starter system is recommended with a consultative ROI call prior to physical survey.`
-      : ` Consumption of ${effectiveUnits} kWh/month (₹${input.avgMonthlyBillInr.toLocaleString('en-IN')}) in ${serviceInfo.city} aligns well with a ${recommendedCapacityKw} kW rooftop system generating ~${(recommendedCapacityKw * annualGenPerKw).toLocaleString('en-IN')} units/year.`;
+      ? ` Monthly usage (${effectiveUnits} kWh, ₹${input.avgMonthlyBillInr}) is modest, so a compact ${recommendedCapacityKw} kW starter system is recommended with a phone qualification call prior to physical survey.`
+      : ` Consumption of ${effectiveUnits} kWh/month (₹${input.avgMonthlyBillInr.toLocaleString('en-IN')}) in ${serviceInfo.city} on ${ROOF_TYPE_LABELS[effectiveRoofType]} aligns well with a ${recommendedCapacityKw} kW rooftop system generating ~${(recommendedCapacityKw * annualGenPerKw).toLocaleString('en-IN')} units/year.`;
 
   return {
     totalScore: Math.min(100, rawSum),
@@ -370,7 +445,7 @@ export function evaluateLeadQualification(input: LeadScoringInput): LeadScoringO
     loadPoints,
     pincodePoints,
     consumptionPoints,
-    recommendationReason: `Homeowner in ${serviceInfo.city} (${input.pincode}).${lowBillNote}${roofLimitedNote}`,
+    recommendationReason: `Homeowner in ${serviceInfo.city} (${input.pincode}).${lowBillNote}${roofLimitedNote}${roofMountingNote}`,
     nextRecommendedAction,
     suggestedSurveyStatus,
   };
@@ -380,11 +455,9 @@ export function evaluateLeadQualification(input: LeadScoringInput): LeadScoringO
 // 5. Effective-Date Rule Selection & Deterministic Quotation Math
 // ============================================================================
 
-export function selectEffectiveRule<T extends Pick<AdminConfigRuleDoc, 'effectiveFrom' | 'effectiveTo' | 'isActive' | 'versionNumber' | 'code'>>(
-  rules: T[],
-  quotationDate: string,
-  codeFilter?: string
-): T {
+export function selectEffectiveRule<
+  T extends Pick<AdminConfigRuleDoc, 'effectiveFrom' | 'effectiveTo' | 'isActive' | 'versionNumber' | 'code'>
+>(rules: T[], quotationDate: string, codeFilter?: string): T {
   const candidates = rules.filter((r) => {
     if (!r.isActive) return false;
     if (codeFilter && r.code !== codeFilter) return false;
@@ -401,11 +474,11 @@ export function selectEffectiveRule<T extends Pick<AdminConfigRuleDoc, 'effectiv
 }
 
 export interface SubsidyRuleParams {
-  firstTierMaxKw: number;      // Sample default: 2
-  firstTierRateInr: number;    // Sample default: 30000
-  secondTierMaxKw: number;     // Sample default: 3
-  secondTierRateInr: number;   // Sample default: 18000
-  maxSubsidyCapInr: number;    // Sample default: 78000
+  firstTierMaxKw: number; // Sample default: 2
+  firstTierRateInr: number; // Sample default: 30000
+  secondTierMaxKw: number; // Sample default: 3
+  secondTierRateInr: number; // Sample default: 18000
+  maxSubsidyCapInr: number; // Sample default: 78000
   residentialOnly: boolean;
 }
 
@@ -434,7 +507,7 @@ export interface QuotationCalculationInput {
   ownershipType: OwnershipType;
   isResidentialTariff: boolean;
   panelPricePerKwInr: number;
-  annualGenPerKw: number; // Brief formula: 1,400 units/kW
+  annualGenPerKw: number; // Default: 1,400 units/kW, configurable by administrators
   installationPerKwInr: number;
   bosAndNetMeteringFlatInr: number;
   customEquipmentAdjustmentInr?: number;
@@ -466,12 +539,14 @@ export function calculateSolarQuotation(input: QuotationCalculationInput): Quota
   }
 
   const annualGenPerKw = input.annualGenPerKw > 0 ? input.annualGenPerKw : 1400;
-  // Exact brief formula: Yearly Generation = System Capacity (kW) × 1,400 units
+  // Deterministic formula: Yearly Generation = System Capacity (kW) × annualGenPerKw (default 1,400 units)
   const annualGenerationUnits = Math.round(input.systemCapacityKw * annualGenPerKw);
 
   const equipmentCostInr = Math.max(
     0,
-    Math.round(input.systemCapacityKw * input.panelPricePerKwInr + (input.customEquipmentAdjustmentInr ?? 0))
+    Math.round(
+      input.systemCapacityKw * input.panelPricePerKwInr + (input.customEquipmentAdjustmentInr ?? 0)
+    )
   );
   const installationChargesInr = Math.max(
     0,
@@ -487,20 +562,22 @@ export function calculateSolarQuotation(input: QuotationCalculationInput): Quota
     input.subsidyRule
   );
 
-  // Exact brief formula: Net Cost = Installation Cost − Applicable Subsidy
+  // Deterministic formula: Net Cost = Gross Installation Cost − Applicable Subsidy
   const netCustomerCostInr = Math.max(0, totalInstallationCostInr - applicableSubsidyInr);
 
   const selfConsumptionRatio =
-    input.selfConsumptionRatio !== undefined && input.selfConsumptionRatio > 0 && input.selfConsumptionRatio <= 1
+    input.selfConsumptionRatio !== undefined &&
+    input.selfConsumptionRatio > 0 &&
+    input.selfConsumptionRatio <= 1
       ? input.selfConsumptionRatio
       : 1.0;
 
   const selfConsumptionUnits = Math.round(annualGenerationUnits * selfConsumptionRatio);
 
-  // Exact brief formula: Annual Savings = Estimated Solar Self-Consumption × Applicable Electricity Tariff
+  // Deterministic formula: Annual Savings = Estimated Solar Self-Consumption × Applicable Electricity Tariff
   const estimatedAnnualSavingsInr = Math.round(selfConsumptionUnits * input.electricityTariffInr);
 
-  // Exact brief formula: Payback Period = Net Cost ÷ Estimated Annual Savings
+  // Deterministic formula: Payback Period = Net Cost ÷ Estimated Annual Savings
   const estimatedPaybackYears =
     estimatedAnnualSavingsInr > 0
       ? Number((netCustomerCostInr / estimatedAnnualSavingsInr).toFixed(1))
@@ -519,6 +596,60 @@ export function calculateSolarQuotation(input: QuotationCalculationInput): Quota
     estimatedAnnualSavingsInr,
     estimatedPaybackYears,
   };
+}
+
+export interface QuotationComparisonOption extends QuotationCalculationResult {
+  optionKey: string;
+  optionLabel: string;
+  isRecommended: boolean;
+  isSelected: boolean;
+}
+
+/**
+ * Deterministically builds 1 kW, 2 kW, 3 kW, and a Suitable Alternative solar option
+ * (e.g. lead's recommended kW when >3, custom selected kW, or 5 kW commercial/high-load option).
+ */
+export function buildMultiOptionComparison(
+  baseInput: QuotationCalculationInput,
+  recommendedCapacityKw?: number
+): QuotationComparisonOption[] {
+  const recKw = recommendedCapacityKw && recommendedCapacityKw > 0 ? recommendedCapacityKw : 0;
+  const selKw = baseInput.systemCapacityKw;
+
+  let alternativeKw = 5;
+  let alternativeSubtitle = 'High-Load Alternative';
+
+  if (recKw > 0 && ![1, 2, 3].includes(recKw)) {
+    alternativeKw = recKw;
+    alternativeSubtitle = 'Recommended Alternative';
+  } else if (selKw > 0 && ![1, 2, 3].includes(selKw)) {
+    alternativeKw = selKw;
+    alternativeSubtitle = 'Selected Alternative';
+  } else {
+    alternativeKw = 5;
+    alternativeSubtitle = 'Suitable Alternative';
+  }
+
+  const tiers: Array<{ kw: number; key: string; label: string }> = [
+    { kw: 1, key: '1kw', label: '1 kW Starter' },
+    { kw: 2, key: '2kw', label: '2 kW Compact' },
+    { kw: 3, key: '3kw', label: '3 kW Standard' },
+    { kw: alternativeKw, key: `alt_${alternativeKw}kw`, label: `${alternativeKw} kW ${alternativeSubtitle}` },
+  ];
+
+  return tiers.map((tier) => {
+    const calc = calculateSolarQuotation({
+      ...baseInput,
+      systemCapacityKw: tier.kw,
+    });
+    return {
+      ...calc,
+      optionKey: tier.key,
+      optionLabel: tier.label,
+      isRecommended: recKw > 0 && Math.abs(recKw - tier.kw) < 0.01,
+      isSelected: Math.abs(selKw - tier.kw) < 0.01,
+    };
+  });
 }
 
 // ============================================================================
@@ -578,10 +709,35 @@ export function evaluateProjectDelay(
 }
 
 // ============================================================================
-// 7. Backend RBAC Authorization Helper
+// 7. Backend RBAC & Administrative Governance Helpers
 // ============================================================================
 
 export const BOOTSTRAPPED_ADMIN_EMAIL = 'rohitumdale@gmail.com';
+
+export function checkAdminAccess(params: {
+  requesterUid: string;
+  requesterEmail?: string;
+  emailVerified?: boolean;
+  requesterRole?: 'HOMEOWNER' | 'SALES_STAFF' | 'ADMIN';
+}): { allowed: boolean; reason?: string } {
+  if (!params.requesterUid) {
+    return { allowed: false, reason: 'Authentication required.' };
+  }
+  if (params.emailVerified === false) {
+    return { allowed: false, reason: 'Verified email token is required.' };
+  }
+  const isBootstrapped =
+    params.emailVerified === true &&
+    params.requesterEmail?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+
+  if (isBootstrapped || params.requesterRole === 'ADMIN') {
+    return { allowed: true };
+  }
+  return {
+    allowed: false,
+    reason: 'Administrator privileges required to modify pricing or subsidy rules.',
+  };
+}
 
 export function checkBackendAccess(params: {
   requesterUid: string;
@@ -591,6 +747,7 @@ export function checkBackendAccess(params: {
   resourceOwnerUid?: string;
   assignedStaffUids?: string[];
   requireStaff?: boolean;
+  requireAdmin?: boolean;
 }): { allowed: boolean; reason?: string } {
   if (!params.requesterUid) {
     return { allowed: false, reason: 'Authentication required.' };
@@ -602,6 +759,10 @@ export function checkBackendAccess(params: {
   const isBootstrapped =
     params.emailVerified === true &&
     params.requesterEmail?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+
+  if (params.requireAdmin) {
+    return checkAdminAccess(params);
+  }
 
   const isStaffOrAdmin =
     isBootstrapped ||
@@ -622,3 +783,4 @@ export function checkBackendAccess(params: {
 
   return { allowed: true };
 }
+

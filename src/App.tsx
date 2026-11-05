@@ -24,8 +24,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (!authReady) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-        <div className="bg-white border border-slate-200 rounded-xl px-6 py-4 text-sm font-medium text-slate-700">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-6 py-4 text-sm font-medium text-slate-700 dark:text-slate-200">
           Initializing SuryaSetu Solar Workspace...
         </div>
       </div>
@@ -44,8 +44,8 @@ function RootRedirect() {
 
   if (!authReady) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-        <div className="bg-white border border-slate-200 rounded-xl px-6 py-4 text-sm font-medium text-slate-700">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-6 py-4 text-sm font-medium text-slate-700 dark:text-slate-200">
           Loading SuryaSetu...
         </div>
       </div>

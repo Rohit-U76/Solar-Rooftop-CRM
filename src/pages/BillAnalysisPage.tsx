@@ -5,6 +5,8 @@ import {
   AlertTriangle,
   Calculator,
   CheckCircle2,
+  Eye,
+  EyeOff,
   Loader2,
   RefreshCw,
   ShieldAlert,
@@ -19,11 +21,13 @@ import {
   uploadElectricityBillFile,
 } from '../lib/apiClient.ts';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase.ts';
+import { t } from '../lib/i18n.ts';
 import {
+  maskConsumerNumber,
   MAX_BILL_FILE_BYTES,
   validateExtractionConfirmation,
 } from '../shared/solarEngine.ts';
-import type { QualificationCategory } from '../types/domain.ts';
+import type { ClarityStatus, QualificationCategory } from '../types/domain.ts';
 
 export function BillAnalysisPage() {
   const { leadId } = useParams<{ leadId: string }>();
@@ -31,12 +35,15 @@ export function BillAnalysisPage() {
   const {
     firebaseUser,
     workspaceMode,
+    language,
+    dataLoading,
     leads,
     bills,
     extractions,
     scores,
     logSimulatedNotification,
   } = useAuthData();
+  const dict = t(language);
 
   const lead = leads.find((l) => l.id === leadId);
   const bill = leadId ? bills[leadId] : undefined;
@@ -52,6 +59,12 @@ export function BillAnalysisPage() {
   const [billingAmountInr, setBillingAmountInr] = useState('0');
   const [billingPeriod, setBillingPeriod] = useState('');
 
+  // Clarity, confidence & PII protection state
+  const [activeClarityStatus, setActiveClarityStatus] = useState<ClarityStatus>('CLEAR');
+  const [activeConfidenceScore, setActiveConfidenceScore] = useState<number>(0);
+  const [showFullConsumer, setShowFullConsumer] = useState<boolean>(false);
+  const [manualBlurryAttested, setManualBlurryAttested] = useState<boolean>(false);
+
   // Staff override form
   const [overrideCategory, setOverrideCategory] = useState<QualificationCategory>('MEDIUM');
   const [overrideCapacityKw, setOverrideCapacityKw] = useState<string>('3');
@@ -61,7 +74,10 @@ export function BillAnalysisPage() {
   const [savingConfirm, setSavingConfirm] = useState(false);
   const [savingOverride, setSavingOverride] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [bannerMsg, setBannerMsg] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
+  const [bannerMsg, setBannerMsg] = useState<{
+    type: 'success' | 'warning' | 'error';
+    text: string;
+  } | null>(null);
 
   useEffect(() => {
     if (extraction) {
@@ -72,6 +88,11 @@ export function BillAnalysisPage() {
       setMonthlyUnitsKwh(String(extraction.monthlyUnitsKwh ?? 0));
       setBillingAmountInr(String(extraction.billingAmountInr ?? 0));
       setBillingPeriod(extraction.billingPeriod || '');
+      setActiveClarityStatus(extraction.clarityStatus);
+      setActiveConfidenceScore(extraction.confidenceScore ?? 0);
+      if (!extraction.consumerNumber) {
+        setShowFullConsumer(true);
+      }
     }
   }, [extraction]);
 
@@ -83,14 +104,30 @@ export function BillAnalysisPage() {
     }
   }, [score]);
 
+  if (dataLoading && !lead) {
+    return (
+      <AppShell title="Bill Analysis & Lead Score" breadcrumb="Leads">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 space-y-4">
+          <div className="h-6 bg-slate-100 dark:bg-slate-800 rounded w-1/3 animate-pulse" />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="h-72 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+            <div className="h-72 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
   if (!lead) {
     return (
       <AppShell title="Bill Analysis & Lead Score" breadcrumb="Leads">
-        <div className="bg-white border border-slate-200 rounded-xl p-8 text-center">
-          <p className="text-sm text-slate-600 mb-4">Lead record not found or loading.</p>
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 text-center">
+          <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+            Lead record not found or access restricted.
+          </p>
           <Link
             to={workspaceMode === 'SALES' ? '/leads' : '/homeowner'}
-            className="px-4 py-2 text-xs font-semibold text-white bg-emerald-900 rounded-lg"
+            className="px-4 py-2 text-xs font-semibold text-white bg-emerald-900 dark:bg-emerald-700 rounded-lg"
           >
             Return to Leads
           </Link>
@@ -113,13 +150,16 @@ export function BillAnalysisPage() {
       setMonthlyUnitsKwh(String(ext.monthlyUnitsKwh));
       setBillingAmountInr(String(ext.billingAmountInr));
       setBillingPeriod(ext.billingPeriod);
+      setActiveClarityStatus(ext.clarityStatus);
+      setActiveConfidenceScore(ext.confidenceScore);
 
       if (res.warningMessage) {
         setBannerMsg({ type: 'warning', text: res.warningMessage });
       } else if (ext.clarityStatus === 'UNCLEAR_REUPLOAD') {
+        setManualBlurryAttested(false);
         setBannerMsg({
           type: 'error',
-          text: 'Gemini Vision detected an unclear or unreadable image. Please upload a clearer bill photo or manually verify every field.',
+          text: 'Gemini Vision detected a blurry or unreadable bill image. Please upload a clearer bill photo or manually verify every field below.',
         });
       } else if (ext.clarityStatus === 'LOW_CONFIDENCE') {
         setBannerMsg({
@@ -146,7 +186,10 @@ export function BillAnalysisPage() {
     const file = e.target.files?.[0];
     if (!file || !bill || !extraction || !firebaseUser) return;
 
-    if (file.size > MAX_BILL_FILE_BYTES || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    if (
+      file.size > MAX_BILL_FILE_BYTES ||
+      !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)
+    ) {
       setBannerMsg({
         type: 'error',
         text: 'Replacement bill must be a valid JPEG, PNG, or WebP under 5 MB.',
@@ -175,11 +218,21 @@ export function BillAnalysisPage() {
       setMonthlyUnitsKwh(String(ext.monthlyUnitsKwh));
       setBillingAmountInr(String(ext.billingAmountInr));
       setBillingPeriod(ext.billingPeriod);
+      setActiveClarityStatus(ext.clarityStatus);
+      setActiveConfidenceScore(ext.confidenceScore);
 
-      setBannerMsg({
-        type: 'success',
-        text: 'Replacement bill uploaded and scanned. Please verify and confirm the extracted fields.',
-      });
+      if (ext.clarityStatus === 'UNCLEAR_REUPLOAD') {
+        setManualBlurryAttested(false);
+        setBannerMsg({
+          type: 'warning',
+          text: `Replacement photo uploaded, but image clarity remains low (${ext.confidenceScore}%). Upload a sharper photo or attest manual entry.`,
+        });
+      } else {
+        setBannerMsg({
+          type: 'success',
+          text: `Replacement bill uploaded and scanned (${ext.confidenceScore}% confidence). Verify and confirm the extracted fields.`,
+        });
+      }
     } catch (err: unknown) {
       setBannerMsg({
         type: 'error',
@@ -194,6 +247,14 @@ export function BillAnalysisPage() {
     e.preventDefault();
     if (!extraction || !score || !firebaseUser) return;
 
+    if (activeClarityStatus === 'UNCLEAR_REUPLOAD' && !manualBlurryAttested) {
+      setBannerMsg({
+        type: 'error',
+        text: 'Blurry/unreadable bill detected: please upload a clearer replacement photo or check the manual verification box below after entering accurate values.',
+      });
+      return;
+    }
+
     const payload = {
       consumerNumber: consumerNumber.trim(),
       discomName: discomName.trim(),
@@ -202,12 +263,15 @@ export function BillAnalysisPage() {
       monthlyUnitsKwh: Number(monthlyUnitsKwh),
       billingAmountInr: Number(billingAmountInr),
       billingPeriod: billingPeriod.trim(),
-      confidenceScore: extraction.confidenceScore,
+      confidenceScore: activeConfidenceScore,
     };
 
     const validation = validateExtractionConfirmation(payload);
     if (!validation.valid) {
       setFieldErrors(validation.errors);
+      if (validation.errors.consumerNumber) {
+        setShowFullConsumer(true);
+      }
       return;
     }
 
@@ -227,12 +291,12 @@ export function BillAnalysisPage() {
         billingAmountInr: payload.billingAmountInr,
         billingPeriod: payload.billingPeriod,
         verificationStatus: verStatus,
-        extractionNotes: `Verified by ${workspaceMode === 'SALES' ? 'Sales Engineer' : 'Homeowner'} on ${new Date().toISOString().slice(0, 10)}.`,
+        extractionNotes: `Verified by ${workspaceMode === 'SALES' ? 'Sales Engineer' : 'Homeowner'} on ${new Date().toISOString().slice(0, 10)} (Confidence ${activeConfidenceScore}%).`,
         verifiedByUid: firebaseUser.uid,
         updatedAt: serverTimestamp(),
       });
 
-      // Recompute deterministic qualification using confirmed bill numbers
+      // Recompute deterministic qualification using confirmed bill numbers + roofType
       const evalRes = await runBackendLeadEvaluation({
         ownershipType: lead.ownershipType,
         avgMonthlyBillInr: payload.billingAmountInr,
@@ -290,6 +354,7 @@ export function BillAnalysisPage() {
         message: `[SIMULATION] Electricity bill (${payload.monthlyUnitsKwh} kWh, ₹${payload.billingAmountInr}) confirmed. Qualification: ${evalRes.category} (${evalRes.totalScore}/100), Recommended Plant: ${evalRes.recommendationLabel}.`,
       });
 
+      setShowFullConsumer(false);
       setBannerMsg({
         type: 'success',
         text: 'Electricity bill details confirmed and deterministic solar qualification updated.',
@@ -363,11 +428,13 @@ export function BillAnalysisPage() {
         {/* Header Bar */}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <div className="text-xs text-slate-500">
-              {lead.ownershipType === 'OWNER' ? 'Property Owner' : 'Tenant'} · {lead.roofType} Roof ({lead.rooftopAreaSqFt} sq ft) · {lead.city} ({lead.pincode})
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              {lead.ownershipType === 'OWNER' ? dict.ownerLabel : dict.tenantLabel} ·{' '}
+              {lead.roofType.replace('_', ' ')} ({lead.rooftopAreaSqFt} sq ft) · {lead.city} (
+              {lead.pincode})
             </div>
-            <h1 className="text-2xl font-bold text-slate-900 mt-0.5">
-              AI Electricity Bill Verification & Solar Recommendation
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-0.5">
+              {dict.billVerifyHeading}
             </h1>
           </div>
 
@@ -376,9 +443,13 @@ export function BillAnalysisPage() {
               type="button"
               onClick={() => void handleLiveRescan()}
               disabled={scanning || !bill}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-800 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-sky-900 dark:text-sky-200 bg-sky-50 dark:bg-sky-950/50 border border-sky-200 dark:border-sky-800 rounded-lg hover:bg-sky-100 dark:hover:bg-sky-900/50 transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap shrink-0"
             >
-              {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+              {scanning ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="w-3.5 h-3.5" />
+              )}
               Run Live Gemini Vision Scan
             </button>
 
@@ -386,7 +457,7 @@ export function BillAnalysisPage() {
               <button
                 type="button"
                 onClick={() => navigate(`/quotations/builder?leadId=${lead.id}`)}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-900 rounded-lg hover:bg-emerald-950 transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-900 dark:bg-emerald-700 rounded-lg hover:bg-emerald-950 dark:hover:bg-emerald-600 transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
                 <Calculator className="w-3.5 h-3.5" />
                 Open Quotation Builder
@@ -395,32 +466,40 @@ export function BillAnalysisPage() {
           </div>
         </div>
 
-        {/* Status / Clarity Alerts */}
-        {extraction?.clarityStatus === 'UNCLEAR_REUPLOAD' && (
-          <div className="p-4 rounded-xl bg-red-50 border border-red-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        {/* Status / Blurry Image Re-Upload Alert */}
+        {activeClarityStatus === 'UNCLEAR_REUPLOAD' && (
+          <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-start gap-3">
-              <ShieldAlert className="w-5 h-5 text-red-700 shrink-0 mt-0.5" />
-              <div className="text-xs text-red-900">
-                <div className="font-semibold">Unclear Electricity Bill Photo — Replacement Requested</div>
-                <p className="mt-0.5">
-                  Gemini Vision could not reliably read key utility fields ({extraction.confidenceScore}% confidence). Never silently accept guessed values—please upload a clearer photo.
-                </p>
+              <ShieldAlert className="w-5 h-5 text-red-700 dark:text-red-400 shrink-0 mt-0.5" />
+              <div className="text-xs text-red-900 dark:text-red-200">
+                <div className="font-semibold">
+                  {dict.unclearBillTitle} ({activeConfidenceScore}% Confidence)
+                </div>
+                <p className="mt-0.5">{dict.unclearBillDesc}</p>
               </div>
             </div>
-            <label className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-red-700 rounded-lg hover:bg-red-800 cursor-pointer shrink-0">
+            <label className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-red-700 dark:bg-red-600 rounded-lg hover:bg-red-800 dark:hover:bg-red-500 cursor-pointer whitespace-nowrap shrink-0">
               <Upload className="w-3.5 h-3.5" />
               Upload Clearer Photo
-              <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => void handleReuploadBill(e)} className="hidden" />
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(e) => void handleReuploadBill(e)}
+                className="hidden"
+              />
             </label>
           </div>
         )}
 
-        {extraction?.clarityStatus === 'LOW_CONFIDENCE' && (
-          <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-3 text-xs text-amber-900">
-            <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+        {activeClarityStatus === 'LOW_CONFIDENCE' && (
+          <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/70 flex items-start gap-3 text-xs text-amber-900 dark:text-amber-200">
+            <AlertTriangle className="w-5 h-5 text-amber-700 dark:text-amber-400 shrink-0 mt-0.5" />
             <div>
-              <span className="font-semibold">Flagged for Manual Verification ({extraction.confidenceScore}% Confidence):</span>{' '}
-              {extraction.extractionNotes || 'Please cross-check every extracted value against the original bill image before confirming.'}
+              <span className="font-semibold">
+                Flagged for Manual Verification ({activeConfidenceScore}% Confidence):
+              </span>{' '}
+              {extraction?.extractionNotes ||
+                'Please cross-check every extracted value against the original bill image before confirming.'}
             </div>
           </div>
         )}
@@ -429,10 +508,10 @@ export function BillAnalysisPage() {
           <div
             className={`p-3.5 rounded-lg border text-xs ${
               bannerMsg.type === 'success'
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/70 text-emerald-950 dark:text-emerald-200'
                 : bannerMsg.type === 'warning'
-                  ? 'bg-amber-50 border-amber-200 text-amber-900'
-                  : 'bg-red-50 border-red-200 text-red-800'
+                  ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800/70 text-amber-900 dark:text-amber-200'
+                  : 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800/70 text-red-800 dark:text-red-200'
             }`}
           >
             {bannerMsg.text}
@@ -442,18 +521,28 @@ export function BillAnalysisPage() {
         {/* Side-by-Side Original Bill Image & Extracted Editable Form */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Left: Original Bill Image */}
-          <div className="lg:col-span-5 bg-white border border-slate-200 rounded-xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
+          <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
               <div>
-                <h2 className="text-sm font-semibold text-slate-900">Original Uploaded Electricity Bill</h2>
-                <p className="text-xs text-slate-500">
-                  {bill?.fileName || 'Protected Document'} · Confidence{' '}
-                  <span className="font-mono tabular-nums font-semibold">
-                    {extraction?.confidenceScore ?? 0}%
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  {dict.originalBillTitle}
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {bill?.fileName || 'Protected Document'} · Extraction Confidence{' '}
+                  <span
+                    className={`font-mono tabular-nums font-semibold ${
+                      activeConfidenceScore >= 75
+                        ? 'text-emerald-800 dark:text-emerald-400'
+                        : activeConfidenceScore >= 35
+                          ? 'text-amber-700 dark:text-amber-400'
+                          : 'text-red-700 dark:text-red-400'
+                    }`}
+                  >
+                    {activeConfidenceScore}%
                   </span>
                 </p>
               </div>
-              <label className="text-xs font-semibold text-emerald-900 hover:underline cursor-pointer">
+              <label className="text-xs font-semibold text-sky-800 dark:text-sky-300 hover:underline cursor-pointer whitespace-nowrap shrink-0">
                 Replace Photo
                 <input
                   type="file"
@@ -474,41 +563,77 @@ export function BillAnalysisPage() {
           {/* Right: Extracted Fields Confirmation Form */}
           <form
             onSubmit={(e) => void handleConfirmExtractionAndScore(e)}
-            className="lg:col-span-7 bg-white border border-slate-200 rounded-xl p-6 space-y-5"
+            className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-5"
           >
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
               <div>
-                <h2 className="text-base font-semibold text-slate-900">Extracted Utility Bill Information</h2>
-                <p className="text-xs text-slate-500">
+                <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  {dict.extractedBillTitle}
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   Inspect, edit any misread characters, and confirm to lock consumption inputs.
                 </p>
               </div>
-              <span className="text-xs text-slate-600 font-medium">
+              <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">
                 {extraction?.verificationStatus === 'STAFF_VERIFIED'
                   ? 'Staff Verified'
                   : extraction?.verificationStatus === 'USER_CONFIRMED'
                     ? 'Customer Confirmed'
-                    : 'Pending Confirmation'}
+                    : activeClarityStatus === 'UNCLEAR_REUPLOAD'
+                      ? 'Re-upload Requested'
+                      : 'Pending Confirmation'}
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Consumer Number *
-                </label>
-                <input
-                  type="text"
-                  value={consumerNumber}
-                  onChange={(e) => setConsumerNumber(e.target.value)}
-                  placeholder="e.g. 410018293401"
-                  className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
-                />
-                {fieldErrors.consumerNumber && <p className="text-xs text-red-600 mt-1">{fieldErrors.consumerNumber}</p>}
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Consumer Number *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowFullConsumer((v) => !v)}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-800 dark:text-sky-300 hover:underline cursor-pointer"
+                  >
+                    {showFullConsumer ? (
+                      <>
+                        <EyeOff className="w-3 h-3" />
+                        Mask
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="w-3 h-3" />
+                        Show / Edit
+                      </>
+                    )}
+                  </button>
+                </div>
+                {showFullConsumer ? (
+                  <input
+                    type="text"
+                    value={consumerNumber}
+                    onChange={(e) => setConsumerNumber(e.target.value)}
+                    placeholder="e.g. 410018293401"
+                    className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-emerald-800 dark:focus:border-emerald-500"
+                  />
+                ) : (
+                  <div className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-200 flex items-center justify-between">
+                    <span>{maskConsumerNumber(consumerNumber)}</span>
+                    <span className="text-[11px] font-sans text-slate-400 dark:text-slate-500">
+                      DPDP Protected
+                    </span>
+                  </div>
+                )}
+                {fieldErrors.consumerNumber && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                    {fieldErrors.consumerNumber}
+                  </p>
+                )}
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Distribution Company (DISCOM) *
                 </label>
                 <input
@@ -516,13 +641,17 @@ export function BillAnalysisPage() {
                   value={discomName}
                   onChange={(e) => setDiscomName(e.target.value)}
                   placeholder="MSEDCL (Mahavitaran)"
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
+                  className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-emerald-800 dark:focus:border-emerald-500"
                 />
-                {fieldErrors.discomName && <p className="text-xs text-red-600 mt-1">{fieldErrors.discomName}</p>}
+                {fieldErrors.discomName && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                    {fieldErrors.discomName}
+                  </p>
+                )}
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Tariff Category *
                 </label>
                 <input
@@ -530,13 +659,17 @@ export function BillAnalysisPage() {
                   value={tariffCategory}
                   onChange={(e) => setTariffCategory(e.target.value)}
                   placeholder="LT-I Residential"
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
+                  className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-emerald-800 dark:focus:border-emerald-500"
                 />
-                {fieldErrors.tariffCategory && <p className="text-xs text-red-600 mt-1">{fieldErrors.tariffCategory}</p>}
+                {fieldErrors.tariffCategory && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                    {fieldErrors.tariffCategory}
+                  </p>
+                )}
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Sanctioned Load (kW) *
                 </label>
                 <input
@@ -545,13 +678,17 @@ export function BillAnalysisPage() {
                   min="0.5"
                   value={sanctionedLoadKw}
                   onChange={(e) => setSanctionedLoadKw(e.target.value)}
-                  className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
+                  className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-800 dark:focus:border-emerald-500"
                 />
-                {fieldErrors.sanctionedLoadKw && <p className="text-xs text-red-600 mt-1">{fieldErrors.sanctionedLoadKw}</p>}
+                {fieldErrors.sanctionedLoadKw && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                    {fieldErrors.sanctionedLoadKw}
+                  </p>
+                )}
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Monthly Electricity Units (kWh) *
                 </label>
                 <input
@@ -559,13 +696,17 @@ export function BillAnalysisPage() {
                   min="1"
                   value={monthlyUnitsKwh}
                   onChange={(e) => setMonthlyUnitsKwh(e.target.value)}
-                  className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
+                  className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-800 dark:focus:border-emerald-500"
                 />
-                {fieldErrors.monthlyUnitsKwh && <p className="text-xs text-red-600 mt-1">{fieldErrors.monthlyUnitsKwh}</p>}
+                {fieldErrors.monthlyUnitsKwh && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                    {fieldErrors.monthlyUnitsKwh}
+                  </p>
+                )}
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Billing Amount (₹) *
                 </label>
                 <input
@@ -573,13 +714,17 @@ export function BillAnalysisPage() {
                   min="1"
                   value={billingAmountInr}
                   onChange={(e) => setBillingAmountInr(e.target.value)}
-                  className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
+                  className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-800 dark:focus:border-emerald-500"
                 />
-                {fieldErrors.billingAmountInr && <p className="text-xs text-red-600 mt-1">{fieldErrors.billingAmountInr}</p>}
+                {fieldErrors.billingAmountInr && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                    {fieldErrors.billingAmountInr}
+                  </p>
+                )}
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Billing Period *
                 </label>
                 <input
@@ -587,23 +732,47 @@ export function BillAnalysisPage() {
                   value={billingPeriod}
                   onChange={(e) => setBillingPeriod(e.target.value)}
                   placeholder="e.g. 15-MAY-2026 to 14-JUN-2026"
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-800"
+                  className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-emerald-800 dark:focus:border-emerald-500"
                 />
-                {fieldErrors.billingPeriod && <p className="text-xs text-red-600 mt-1">{fieldErrors.billingPeriod}</p>}
+                {fieldErrors.billingPeriod && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                    {fieldErrors.billingPeriod}
+                  </p>
+                )}
               </div>
             </div>
 
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-4">
-              <span className="text-xs text-slate-500">
+            {activeClarityStatus === 'UNCLEAR_REUPLOAD' && (
+              <label className="flex items-start gap-2.5 p-3 rounded-lg bg-red-50/70 dark:bg-red-950/40 border border-red-200 dark:border-red-800/70 text-xs text-red-900 dark:text-red-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={manualBlurryAttested}
+                  onChange={(e) => setManualBlurryAttested(e.target.checked)}
+                  className="mt-0.5 accent-red-700 dark:accent-red-500"
+                />
+                <span>
+                  I cannot upload a clearer bill photo right now and confirm I have manually entered
+                  and verified Consumer Number, Tariff, Sanctioned Load, and Monthly Units from the
+                  physical paper bill.
+                </span>
+              </label>
+            )}
+
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
                 Confirming recalculates lead score & solar sizing deterministically.
               </span>
               <button
                 type="submit"
                 disabled={savingConfirm}
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-emerald-900 rounded-lg hover:bg-emerald-950 transition-colors cursor-pointer disabled:opacity-60"
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-emerald-900 dark:bg-emerald-700 rounded-lg hover:bg-emerald-950 dark:hover:bg-emerald-600 transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap shrink-0"
               >
-                {savingConfirm ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                {workspaceMode === 'SALES' ? 'Verify & Lock Bill Data' : 'Confirm Extracted Bill Data'}
+                {savingConfirm ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4" />
+                )}
+                {workspaceMode === 'SALES' ? dict.verifyLockBtn : dict.confirmBillBtn}
               </button>
             </div>
           </form>
@@ -611,41 +780,47 @@ export function BillAnalysisPage() {
 
         {/* Module 3: Transparent Lead Qualification & Solar Recommendation */}
         {score && (
-          <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-6">
-            <div className="flex flex-wrap items-start justify-between gap-4 pb-4 border-b border-slate-100">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-6">
+            <div className="flex flex-wrap items-start justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">
+                <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
                   Transparent Lead Qualification & Rooftop Sizing
                 </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Rule-based backend evaluation across ownership, bill, consumption, roof area, sanctioned load, and Vidarbha pincode.
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Rule-based backend evaluation across ownership, bill, consumption, roof area &amp;
+                  type ({lead.roofType.replace('_', ' ')}), sanctioned load, and Vidarbha pincode.
                 </p>
               </div>
 
               <div className="flex items-center gap-6">
                 <div className="text-right">
-                  <div className="text-xs text-slate-500">Lead Score</div>
-                  <div className="font-mono tabular-nums text-2xl font-bold text-slate-900">
-                    {score.totalScore}<span className="text-sm font-normal text-slate-400">/100</span>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">Lead Score</div>
+                  <div className="font-mono tabular-nums text-2xl font-bold text-slate-900 dark:text-slate-100">
+                    {score.totalScore}
+                    <span className="text-sm font-normal text-slate-400 dark:text-slate-500">
+                      /100
+                    </span>
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-xs text-slate-500">Qualification</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">Qualification</div>
                   <div
                     className={`text-lg font-bold ${
                       score.category === 'HIGH'
-                        ? 'text-emerald-800'
+                        ? 'text-emerald-800 dark:text-emerald-400'
                         : score.category === 'MEDIUM'
-                          ? 'text-amber-700'
-                          : 'text-slate-600'
+                          ? 'text-sky-800 dark:text-sky-300'
+                          : 'text-slate-600 dark:text-slate-400'
                     }`}
                   >
                     {score.category}
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-xs text-slate-500">Recommended Solar</div>
-                  <div className="font-mono tabular-nums text-lg font-bold text-emerald-900">
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    Recommended Solar
+                  </div>
+                  <div className="font-mono tabular-nums text-lg font-bold text-emerald-900 dark:text-emerald-400">
                     {score.recommendationLabel}
                   </div>
                 </div>
@@ -654,43 +829,68 @@ export function BillAnalysisPage() {
 
             {/* 6-Factor Transparent Point Breakdown */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
-              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200/80">
-                <div className="text-slate-500">Ownership</div>
-                <div className="font-mono tabular-nums font-bold text-slate-900 mt-1">{score.ownershipPoints} / 20</div>
+              <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700">
+                <div className="text-slate-500 dark:text-slate-400">Ownership</div>
+                <div className="font-mono tabular-nums font-bold text-slate-900 dark:text-slate-100 mt-1">
+                  {score.ownershipPoints} / 20
+                </div>
               </div>
-              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200/80">
-                <div className="text-slate-500">Monthly Bill</div>
-                <div className="font-mono tabular-nums font-bold text-slate-900 mt-1">{score.billPoints} / 28</div>
+              <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700">
+                <div className="text-slate-500 dark:text-slate-400">Monthly Bill</div>
+                <div className="font-mono tabular-nums font-bold text-slate-900 dark:text-slate-100 mt-1">
+                  {score.billPoints} / 28
+                </div>
               </div>
-              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200/80">
-                <div className="text-slate-500">Units (kWh)</div>
-                <div className="font-mono tabular-nums font-bold text-slate-900 mt-1">{score.consumptionPoints} / 18</div>
+              <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700">
+                <div className="text-slate-500 dark:text-slate-400">Units (kWh)</div>
+                <div className="font-mono tabular-nums font-bold text-slate-900 dark:text-slate-100 mt-1">
+                  {score.consumptionPoints} / 18
+                </div>
               </div>
-              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200/80">
-                <div className="text-slate-500">Roof Area</div>
-                <div className="font-mono tabular-nums font-bold text-slate-900 mt-1">{score.roofAreaPoints} / 14</div>
+              <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700">
+                <div
+                  className="text-slate-500 dark:text-slate-400 truncate"
+                  title={`Area & ${lead.roofType}`}
+                >
+                  Roof ({lead.roofType.replace('_', ' ')})
+                </div>
+                <div className="font-mono tabular-nums font-bold text-slate-900 dark:text-slate-100 mt-1">
+                  {score.roofAreaPoints} / 14
+                </div>
               </div>
-              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200/80">
-                <div className="text-slate-500">Sanctioned Load</div>
-                <div className="font-mono tabular-nums font-bold text-slate-900 mt-1">{score.loadPoints} / 10</div>
+              <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700">
+                <div className="text-slate-500 dark:text-slate-400">Sanctioned Load</div>
+                <div className="font-mono tabular-nums font-bold text-slate-900 dark:text-slate-100 mt-1">
+                  {score.loadPoints} / 10
+                </div>
               </div>
-              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200/80">
-                <div className="text-slate-500">Vidarbha Zone</div>
-                <div className="font-mono tabular-nums font-bold text-slate-900 mt-1">{score.pincodePoints} / 10</div>
+              <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700">
+                <div className="text-slate-500 dark:text-slate-400">Vidarbha Zone</div>
+                <div className="font-mono tabular-nums font-bold text-slate-900 dark:text-slate-100 mt-1">
+                  {score.pincodePoints} / 10
+                </div>
               </div>
             </div>
 
             {/* Explanation & Next Recommended Action */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">
-              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
-                <div className="text-xs font-semibold text-slate-700 mb-1">Reason for Recommendation</div>
-                <p className="text-sm text-slate-700 leading-relaxed">{score.recommendationReason}</p>
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
+                  Reason for Recommendation
+                </div>
+                <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
+                  {score.recommendationReason}
+                </p>
               </div>
-              <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200">
-                <div className="text-xs font-semibold text-emerald-950 mb-1">Next Recommended Action</div>
-                <p className="text-sm text-emerald-950 leading-relaxed">{score.nextRecommendedAction}</p>
+              <div className="p-4 rounded-xl bg-sky-50/70 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800/70">
+                <div className="text-xs font-semibold text-sky-950 dark:text-sky-200 mb-1">
+                  Next Recommended Action (Low-Score Leads Never Auto-Rejected)
+                </div>
+                <p className="text-sm text-sky-950 dark:text-sky-100 leading-relaxed">
+                  {score.nextRecommendedAction}
+                </p>
                 {score.isOverridden && (
-                  <p className="text-xs text-emerald-800 mt-2 pt-2 border-t border-emerald-200">
+                  <p className="text-xs text-sky-900 dark:text-sky-300 mt-2 pt-2 border-t border-sky-200 dark:border-sky-800">
                     Sales Override Note: {score.overrideReason}
                   </p>
                 )}
@@ -699,17 +899,22 @@ export function BillAnalysisPage() {
 
             {/* Sales Staff Override Control */}
             {workspaceMode === 'SALES' && (
-              <form onSubmit={(e) => void handleStaffOverride(e)} className="pt-5 border-t border-slate-200">
-                <div className="text-xs font-semibold text-slate-800 mb-3">
+              <form
+                onSubmit={(e) => void handleStaffOverride(e)}
+                className="pt-5 border-t border-slate-200 dark:border-slate-800"
+              >
+                <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 mb-3">
                   Sales Engineer Recommendation Override (Requires Recorded Audit Reason)
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
                   <div className="sm:col-span-3">
-                    <label className="block text-xs text-slate-600 mb-1">Override Priority</label>
+                    <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">
+                      Override Priority
+                    </label>
                     <select
                       value={overrideCategory}
                       onChange={(e) => setOverrideCategory(e.target.value as QualificationCategory)}
-                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
+                      className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
                     >
                       <option value="HIGH">HIGH</option>
                       <option value="MEDIUM">MEDIUM</option>
@@ -717,7 +922,9 @@ export function BillAnalysisPage() {
                     </select>
                   </div>
                   <div className="sm:col-span-2">
-                    <label className="block text-xs text-slate-600 mb-1">Capacity (kW)</label>
+                    <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">
+                      Capacity (kW)
+                    </label>
                     <input
                       type="number"
                       min={0}
@@ -725,24 +932,26 @@ export function BillAnalysisPage() {
                       step={1}
                       value={overrideCapacityKw}
                       onChange={(e) => setOverrideCapacityKw(e.target.value)}
-                      className="w-full px-3 py-2 text-xs font-mono tabular-nums border border-slate-300 rounded-lg bg-white"
+                      className="w-full px-3 py-2 text-xs font-mono tabular-nums border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
                     />
                   </div>
                   <div className="sm:col-span-5">
-                    <label className="block text-xs text-slate-600 mb-1">Recorded Override Reason *</label>
+                    <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">
+                      Recorded Override Reason *
+                    </label>
                     <input
                       type="text"
                       value={overrideReason}
                       onChange={(e) => setOverrideReason(e.target.value)}
                       placeholder="e.g. Landlord written NOC verified during phone call"
-                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
+                      className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
                     />
                   </div>
                   <div className="sm:col-span-2">
                     <button
                       type="submit"
                       disabled={savingOverride}
-                      className="w-full py-2 px-3 text-xs font-semibold text-slate-900 bg-slate-100 border border-slate-300 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
+                      className="w-full py-2 px-3 text-xs font-semibold text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer whitespace-nowrap"
                     >
                       {savingOverride ? 'Saving...' : 'Apply Override'}
                     </button>

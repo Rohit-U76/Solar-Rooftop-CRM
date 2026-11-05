@@ -62,8 +62,8 @@ export function ProtectedBillImage({
 
   if (loading) {
     return (
-      <div className="w-full min-h-[280px] bg-slate-100 border border-slate-200 rounded-lg flex flex-col items-center justify-center gap-2 text-slate-500">
-        <Loader2 className="w-5 h-5 animate-spin text-emerald-800" />
+      <div className="w-full min-h-[280px] bg-slate-100 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-lg flex flex-col items-center justify-center gap-2 text-slate-500 dark:text-slate-400">
+        <Loader2 className="w-5 h-5 animate-spin text-emerald-800 dark:text-emerald-400" />
         <span className="text-xs">Loading protected electricity bill document...</span>
       </div>
     );
@@ -71,10 +71,12 @@ export function ProtectedBillImage({
 
   if (failed || !resolvedUrl) {
     return (
-      <div className="w-full min-h-[280px] bg-slate-100 border border-slate-200 rounded-lg flex flex-col items-center justify-center gap-2 p-6 text-center">
-        <FileText className="w-8 h-8 text-slate-400" />
-        <p className="text-sm font-medium text-slate-700">Electricity Bill Document Preview</p>
-        <p className="text-xs text-slate-500 max-w-xs">
+      <div className="w-full min-h-[280px] bg-slate-100 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-lg flex flex-col items-center justify-center gap-2 p-6 text-center">
+        <FileText className="w-8 h-8 text-slate-400 dark:text-slate-500" />
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+          Electricity Bill Document Preview
+        </p>
+        <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs">
           Protected bill image unavailable or restricted. Authorized users may upload a replacement scan.
         </p>
       </div>

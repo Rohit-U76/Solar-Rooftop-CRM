@@ -1,6 +1,10 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import type { ClarityStatus } from '../types/domain.ts';
-import type { LeadScoringInput, LeadScoringOutput } from '../shared/solarEngine.ts';
+import {
+  classifyBillExtractionClarity,
+  type LeadScoringInput,
+  type LeadScoringOutput,
+} from '../shared/solarEngine.ts';
 
 function getGenAIClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -44,6 +48,14 @@ export function validateImageMagicBytes(buffer: Buffer, mimeType: string): boole
   return false;
 }
 
+export function validateDocumentMagicBytes(buffer: Buffer, mimeType: string): boolean {
+  if (!buffer || buffer.length < 8) return false;
+  if (mimeType === 'application/pdf') {
+    return buffer.toString('ascii', 0, 5) === '%PDF-';
+  }
+  return validateImageMagicBytes(buffer, mimeType);
+}
+
 export interface GeminiBillExtractionResult {
   consumerNumber: string;
   discomName: string;
@@ -63,7 +75,9 @@ export async function analyzeElectricityBillImage(
   mimeType: string
 ): Promise<GeminiBillExtractionResult> {
   if (!validateImageMagicBytes(imageBuffer, mimeType)) {
-    const err = new Error('Uploaded file failed binary image signature verification. Please upload a valid JPEG, PNG, or WebP photo.');
+    const err = new Error(
+      'Uploaded file failed binary image signature verification. Please upload a valid JPEG, PNG, or WebP photo.'
+    );
     (err as Error & { code?: string }).code = 'INVALID_IMAGE_BINARY';
     throw err;
   }
@@ -108,15 +122,18 @@ export async function analyzeElectricityBillImage(
           },
           discomName: {
             type: Type.STRING,
-            description: 'Electricity distribution company name (e.g., MSEDCL / Mahavitaran / VPDCL), or empty string.',
+            description:
+              'Electricity distribution company name (e.g., MSEDCL / Mahavitaran / VPDCL), or empty string.',
           },
           tariffCategory: {
             type: Type.STRING,
-            description: 'Tariff category such as LT-I Residential or LT-II Commercial, or empty string.',
+            description:
+              'Tariff category such as LT-I Residential or LT-II Commercial, or empty string.',
           },
           sanctionedLoadKw: {
             type: Type.NUMBER,
-            description: 'Sanctioned load in kW (convert HP to kW if printed in HP using 0.746, or 0 if not visible).',
+            description:
+              'Sanctioned load in kW (convert HP to kW if printed in HP using 0.746, or 0 if not visible).',
           },
           monthlyUnitsKwh: {
             type: Type.NUMBER,
@@ -140,7 +157,8 @@ export async function analyzeElectricityBillImage(
           },
           extractionNotes: {
             type: Type.STRING,
-            description: 'Concise factual note describing readability and any missing fields requiring human verification.',
+            description:
+              'Concise factual note describing readability and any missing fields requiring human verification.',
           },
         },
         required: [
@@ -162,18 +180,15 @@ export async function analyzeElectricityBillImage(
   const rawText = (response.text ?? '{}').trim();
   const parsed = JSON.parse(rawText) as Partial<GeminiBillExtractionResult>;
 
-  const confidence = Math.max(0, Math.min(100, Math.round(Number(parsed.confidenceScore ?? 0))));
   const units = Math.max(0, Number(parsed.monthlyUnitsKwh ?? 0));
   const amount = Math.max(0, Number(parsed.billingAmountInr ?? 0));
 
-  let clarityStatus: ClarityStatus = 'LOW_CONFIDENCE';
-  if (parsed.clarityStatus === 'UNCLEAR_REUPLOAD' || confidence < 35 || (units === 0 && amount === 0)) {
-    clarityStatus = 'UNCLEAR_REUPLOAD';
-  } else if (parsed.clarityStatus === 'CLEAR' && confidence >= 75 && units > 0 && amount > 0) {
-    clarityStatus = 'CLEAR';
-  } else {
-    clarityStatus = 'LOW_CONFIDENCE';
-  }
+  const { clarityStatus, confidenceScore } = classifyBillExtractionClarity({
+    confidenceScore: Number(parsed.confidenceScore ?? 0),
+    monthlyUnitsKwh: units,
+    billingAmountInr: amount,
+    reportedClarity: parsed.clarityStatus,
+  });
 
   return {
     consumerNumber: String(parsed.consumerNumber ?? '').slice(0, 60),
@@ -183,12 +198,12 @@ export async function analyzeElectricityBillImage(
     monthlyUnitsKwh: Math.min(200000, units),
     billingAmountInr: Math.min(1000000, amount),
     billingPeriod: String(parsed.billingPeriod ?? '').slice(0, 80),
-    confidenceScore: confidence,
+    confidenceScore,
     clarityStatus,
     extractionNotes: String(
       parsed.extractionNotes ||
         (clarityStatus === 'UNCLEAR_REUPLOAD'
-          ? 'Bill image is unclear or incomplete. Please upload a clearer photo.'
+          ? 'Bill image is blurry or unreadable. Please upload a clearer photo.'
           : clarityStatus === 'LOW_CONFIDENCE'
             ? 'Low extraction confidence on one or more fields; manual verification required.'
             : 'All primary utility fields extracted clearly. Please review and confirm.')
@@ -209,7 +224,7 @@ export async function generateTransparentAiExplanation(
         `Ownership: ${input.ownershipType}\n` +
         `Monthly Bill: ₹${input.avgMonthlyBillInr}\n` +
         `Monthly Units: ${input.monthlyUnitsKwh} kWh\n` +
-        `Roof Area: ${input.rooftopAreaSqFt} sq ft\n` +
+        `Roof Area: ${input.rooftopAreaSqFt} sq ft (${input.roofType || 'RCC'})\n` +
         `Sanctioned Load: ${input.sanctionedLoadKw} kW\n` +
         `Pincode: ${input.pincode}\n` +
         `Deterministic Score: ${deterministic.totalScore}/100 (${deterministic.category})\n` +
@@ -230,3 +245,4 @@ export async function generateTransparentAiExplanation(
     return deterministic.recommendationReason;
   }
 }
+

@@ -46,6 +46,9 @@ import type {
 } from '../types/domain.ts';
 
 const PREFERRED_MODE_STORAGE_PREFIX = 'suryasetu_pref_workspace_';
+const THEME_STORAGE_KEY = 'suryasetu_theme';
+
+export type ThemeMode = 'light' | 'dark';
 
 interface AuthDataContextValue {
   firebaseUser: User | null;
@@ -56,6 +59,7 @@ interface AuthDataContextValue {
   isBootstrappedAdmin: boolean;
   workspaceMode: WorkspaceMode;
   language: SupportedLanguage;
+  theme: ThemeMode;
   leads: SolarLeadDoc[];
   leadContacts: Record<string, LeadContactPiiDoc>;
   bills: Record<string, ElectricityBillDoc>;
@@ -84,6 +88,8 @@ interface AuthDataContextValue {
   signOutUser: () => Promise<void>;
   switchWorkspaceMode: (mode: WorkspaceMode) => Promise<void>;
   switchLanguage: (lang: SupportedLanguage) => Promise<void>;
+  setThemeMode: (mode: ThemeMode) => void;
+  toggleTheme: () => void;
   reseedDemoData: () => Promise<boolean>;
   logSimulatedNotification: (params: {
     recipientUid: string;
@@ -106,6 +112,30 @@ export function AuthDataProvider({ children }: { children: React.ReactNode }) {
   const [authReady, setAuthReady] = useState<boolean>(false);
   const [dataLoading, setDataLoading] = useState<boolean>(false);
   const [verificationTick, setVerificationTick] = useState<number>(0);
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    try {
+      return localStorage.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light';
+    } catch {
+      return 'light';
+    }
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      // Ignore storage write errors in restricted iframes
+    }
+  }, [theme]);
+
+  const setThemeMode = (mode: ThemeMode) => {
+    setTheme(mode);
+  };
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
 
   const [leads, setLeads] = useState<SolarLeadDoc[]>([]);
   const [leadContacts, setLeadContacts] = useState<Record<string, LeadContactPiiDoc>>({});
@@ -574,6 +604,7 @@ export function AuthDataProvider({ children }: { children: React.ReactNode }) {
         isBootstrappedAdmin,
         workspaceMode: profile?.activeWorkspace ?? 'HOMEOWNER',
         language: profile?.preferredLanguage ?? 'en',
+        theme,
         leads,
         leadContacts,
         bills,
@@ -593,6 +624,8 @@ export function AuthDataProvider({ children }: { children: React.ReactNode }) {
         signOutUser,
         switchWorkspaceMode,
         switchLanguage,
+        setThemeMode,
+        toggleTheme,
         reseedDemoData,
         logSimulatedNotification,
         markNotificationRead,
